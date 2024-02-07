@@ -1,6 +1,20 @@
 # Variational Entropy Search
-**VES-experiment.ipynb:** implementation of VES on some toy examples;
 
-**rff.py:** main file containing VES functions using random Fourier features;
+This repo contains code for our paper "Variational Entropy Search for Adjusting Expected Improvement". 
 
-**bayesian_optimization_util.py:** helper functions for plotting.
+## Referencing this code
+
+If you use this code in any of your own work, please refer our paper: 
+
+## Description of code
+### Demos
+
+- **BO-2D-updated.ipynb:** Demonstration for implementing VES-Gamma on 12 different test functions;
+- **iris.ipynb:** Hyper-parameter tuning for XGBoost on iris dataset;
+
+### Support
+
+- **ves.py:** Main file containing *VariationalEntropySearch* class and functions for running 1D and 2D experiments;
+
+## Instruction for creating plots
+Follow the provided demos
