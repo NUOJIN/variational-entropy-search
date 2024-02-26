@@ -5,6 +5,17 @@ This repo contains code for our paper "Variational Entropy Search for Adjusting 
 ## Referencing this code
 
 If you use this code in any of your own work, please refer our paper: 
+```
+@misc{cheng2024variational,
+  title={Variational Entropy Search for Adjusting Expected Improvement},
+  author={Cheng, Nuojin and Becker, Stephen},
+  journal={arXiv preprint arXiv:2402.11345},
+  year={2024},
+  eprint={2402.11345},
+  archivePrefix={arXiv},
+  primaryClass={stat.ML}
+}
+```
 
 ## Description of code
 ### Demos
