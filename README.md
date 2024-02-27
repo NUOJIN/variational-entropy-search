@@ -22,7 +22,7 @@ If you use this code in any of your own work, please refer our paper:
 - **BO-1D.ipynb:** A 1D toy case comparing VES-Gamma with other functions;
 - **BO-2D.ipynb:** Demonstration for implementing VES-Gamma on 3 different test functions;
 
-### Demos for Read Datasets
+### Demos for Real Datasets
 - **iris.ipynb:** Hyper-parameter tuning for XGBoost on the iris dataset;
 - **digits.ipynb:** Hyper-parameter tuning for XGBoost on the digits dataset;
 - **wine.ipynb:** Hyper-parameter tuning for XGBoost on the wine dataset;
