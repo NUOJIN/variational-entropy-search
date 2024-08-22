@@ -2,9 +2,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Optional, Tuple, Callable, Union
 import numpy as np
-# import matplotlib.pyplot as plt
 import torch
-# from tqdm import tqdm
 from botorch.acquisition.monte_carlo import MCAcquisitionFunction
 from botorch.models.model import Model
 from botorch.sampling import SobolEngine
@@ -72,12 +70,12 @@ def optimize_posterior_samples(
     
     return f_max.detach()
 
-def find_root_log_minus_digamma(xx, initial_guess, tol=1e-5, max_iter=100):
+def find_root_log_minus_digamma(intercept, initial_guess, tol=1e-5, max_iter=int(1e4)):
     """
     Find a root of the function log(x) - digamma(x) - xx using Newton's method.
 
     Args:
-    xx (float or tensor): The constant value to subtract in the function.
+    intercept (float or tensor): The constant value to subtract in the function.
     initial_guess (float or tensor): Initial guess for the root.
     tol (float): Tolerance for convergence.
     max_iter (int): Maximum number of iterations.
@@ -87,7 +85,7 @@ def find_root_log_minus_digamma(xx, initial_guess, tol=1e-5, max_iter=100):
     """
     x = initial_guess
     for _ in range(max_iter):
-        value = torch.log(x) - digamma(x) - xx
+        value = torch.log(x) - digamma(x) - intercept
         derivative = 1/x - polygamma(1, x)  # derivative of the function
 
         # Newton's method update
@@ -98,7 +96,8 @@ def find_root_log_minus_digamma(xx, initial_guess, tol=1e-5, max_iter=100):
             return x_new
 
         x = x_new
-
+    print("The root finding method does not converge. \
+          A default value 1.0 is assigned on k.")
     return torch.tensor(1.0)
 
 class HalfVESGamma(MCAcquisitionFunction):
