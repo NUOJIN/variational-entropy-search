@@ -1,33 +1,45 @@
 from __future__ import annotations
+
+import time
+from argparse import ArgumentParser
 from copy import deepcopy
-from typing import Any, Optional, Tuple, Callable, Union
+from typing import Any, Optional, Tuple, Union
+
+from botorch.test_functions import Hartmann
+import grpc
 import numpy as np
 # import matplotlib.pyplot as plt
 import torch
+from bencherscaffold.bencher_pb2 import BenchmarkRequest
+from bencherscaffold.bencher_pb2_grpc import BencherStub
+from botorch.acquisition import ExpectedImprovement
 # from tqdm import tqdm
 from botorch.acquisition.monte_carlo import MCAcquisitionFunction
-from botorch.models.model import Model
-from botorch.sampling import SobolEngine
-# from botorch.utils.sampling import optimize_posterior_samples
-from botorch.models import SingleTaskGP
 from botorch.fit import fit_gpytorch_mll
-from botorch.acquisition.max_value_entropy_search import qMaxValueEntropy
+from botorch.models import SingleTaskGP
+# from botorch.utils.sampling import optimize_posterior_samples
+from botorch.models.model import Model
+from botorch.models.transforms.outcome import Standardize
 from botorch.optim import optimize_acqf
+from botorch.sampling import SobolEngine
+from botorch.sampling.pathwise import draw_matheron_paths
+from gpytorch.mlls import ExactMarginalLogLikelihood
 from torch import Tensor
 from torch.special import digamma, polygamma
+
 
 # NUM_OPTIMA = 100
 
 def optimize_posterior_samples(
-    paths,
-    bounds: Tensor,
-    maximize: Optional[bool] = True,
-    candidates: Optional[Tensor] = None,
-    raw_samples: Optional[int] = 2048,
-    num_restarts: Optional[int] = 10,
-    maxiter: int = 100,
-    spray_points: int = 20,
-    lr: float = 2.5e-4
+        paths,
+        bounds: Tensor,
+        maximize: Optional[bool] = True,
+        candidates: Optional[Tensor] = None,
+        raw_samples: Optional[int] = 2048,
+        num_restarts: Optional[int] = 10,
+        maxiter: int = 100,
+        spray_points: int = 20,
+        lr: float = 2.5e-4
 ) -> Tuple[Tensor, Tensor]:
     r"""Cheaply optimizes posterior samples by random querying followed by vanilla
     gradient descent on the best num_restarts points.
@@ -49,30 +61,36 @@ def optimize_posterior_samples(
         Tuple[Tensor, Tensor]: The optimal input-output pair(s) (X^*. f^*)
     """
     candidate_set = SobolEngine(
-        dimension=bounds.shape[0], scramble=True).draw(raw_samples)
+        dimension=bounds.shape[0], scramble=True
+    ).draw(raw_samples)
     # TODO add spray points
     # queries all samples on all candidates - output raw_samples * num_objectives * num_optima
     candidate_queries = paths.forward(candidate_set)
     num_optima = candidate_queries.shape[0]
-    batch_size = candidate_queries.shape[1] if candidate_queries.ndim == 3 else 1 
-    argtop_candidates = candidate_queries.argsort(dim=-1, descending=True)[
-        ..., 0:num_restarts]
-    
+    batch_size = candidate_queries.shape[1] if candidate_queries.ndim == 3 else 1
+    argtop_candidates = candidate_queries.argsort(dim=-1, descending=True)[..., 0:num_restarts]
+
     # These are used as masks when retrieving the argmaxes
-    row_indexer = torch.arange(num_optima * batch_size).to(torch.long)
     X_argtop = candidate_set[argtop_candidates, :].requires_grad_(requires_grad=True)
     for i in range(maxiter):
         per_sample_outputs = paths.forward(X_argtop)
         grads = torch.autograd.grad(
-            per_sample_outputs, X_argtop, grad_outputs=torch.ones_like(per_sample_outputs))[0]
+            per_sample_outputs, X_argtop, grad_outputs=torch.ones_like(per_sample_outputs)
+        )[0]
         X_argtop = torch.clamp(X_argtop + lr * grads, 0, 1)  # TODO fix bounds here
-    
+
     per_sample_outputs = paths.forward(X_argtop).reshape(num_optima * batch_size, num_restarts)
     f_max = per_sample_outputs.max(axis=-1).values.reshape(num_optima, batch_size, 1)
-    
+
     return f_max.detach()
 
-def find_root_log_minus_digamma(xx, initial_guess, tol=1e-5, max_iter=100):
+
+def find_root_log_minus_digamma(
+        xx: float | Tensor,
+        initial_guess: float | Tensor,
+        tol: float = 1e-5,
+        max_iter: int = 100
+) -> float | Tensor:
     """
     Find a root of the function log(x) - digamma(x) - xx using Newton's method.
 
@@ -88,7 +106,7 @@ def find_root_log_minus_digamma(xx, initial_guess, tol=1e-5, max_iter=100):
     x = initial_guess
     for _ in range(max_iter):
         value = torch.log(x) - digamma(x) - xx
-        derivative = 1/x - polygamma(1, x)  # derivative of the function
+        derivative = 1 / x - polygamma(1, x)  # derivative of the function
 
         # Newton's method update
         x_new = x - value / derivative
@@ -99,17 +117,18 @@ def find_root_log_minus_digamma(xx, initial_guess, tol=1e-5, max_iter=100):
 
         x = x_new
 
-    return torch.tensor(1.0)
+    return torch.tensor(x)
+
 
 class HalfVESGamma(MCAcquisitionFunction):
     def __init__(
-        self,
-        model: Model,
-        best_f: Union[float, Tensor],
-        paths,
-        optimal_outputs: Tensor,
-        k: Union[float, Tensor],
-        beta: Union[float, Tensor]
+            self,
+            model: Model,
+            best_f: Union[float, Tensor],
+            paths,
+            optimal_outputs: Tensor,
+            k: Union[float, Tensor],
+            beta: Union[float, Tensor]
     ):
         """
         HalfVESGamma is initialized with following args
@@ -132,7 +151,10 @@ class HalfVESGamma(MCAcquisitionFunction):
         # Assign optimal outputs y^*
         self.optimal_outputs = optimal_outputs
 
-    def forward(self, X: Tensor):
+    def forward(
+            self,
+            X: Tensor
+    ):
         """
         The forward function evaluates ESLB for fixed k and beta
         Follow Eq 3.8
@@ -144,22 +166,23 @@ class HalfVESGamma(MCAcquisitionFunction):
         posterior_samples = self.paths(X.squeeze(1))
         improvement_term = torch.max(posterior_samples, self.best_f).unsqueeze(1)
         # This should be able to be logged, since it is per-sample
-        max_value_term = (self.optimal_outputs - improvement_term).clamp_min(1e-3) 
+        max_value_term = (self.optimal_outputs - improvement_term).clamp_min(1e-3)
         log_max_value = max_value_term.log()
         max_value_mean = max_value_term.nanmean(0)
         log_max_mean = log_max_value.nanmean(0)
 
         return ((self.k - 1) * log_max_mean + self.beta * max_value_mean).squeeze()
 
+
 class VariationalEntropySearchGamma(MCAcquisitionFunction):
 
     def __init__(
-        self,
-        model: Model,
-        best_f: Union[float, Tensor],
-        paths,
-        bounds: Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
-        **kwargs: Any,
+            self,
+            model: Model,
+            best_f: Union[float, Tensor],
+            paths,
+            bounds: Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
+            **kwargs: Any,
     ):
         """
         The VES(-Gamma) class should be initialized with following args
@@ -172,12 +195,17 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         self.sampling_model = deepcopy(model)
         self.best_f = best_f
         self.optimal_outputs = optimize_posterior_samples(
-            paths, 
-            bounds)
+            paths,
+            bounds
+        )
         self.paths = paths
         self.bounds = bounds
 
-    def forward(self, X, num_iter: int = 64):
+    def forward(
+            self,
+            X,
+            num_iter: int = 64
+    ):
         """
         This VES class implements VES-Gamma, a special case of VES. 
         There are two steps: the first step is to design a new halfVES class, which
@@ -192,30 +220,37 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             candidate: the optimal position for the solution
             acq_value: the value of its position
         """
+        assert num_iter > 0, "Number of iterations should be positive"
+
         cur_X = X
         for i in range(num_iter):
             # Step 1: Find current optimal k and beta
             max_value_term = self.generate_max_value_term(cur_X)
             kval, betaval = self.find_k(max_value_term)
-            halfVES = HalfVESGamma(self.model, 
-                                   self.best_f, 
-                                   self.paths,
-                                   self.optimal_outputs,
-                                   kval.item(), betaval.item())
+            halfVES = HalfVESGamma(
+                self.model,
+                self.best_f,
+                self.paths,
+                self.optimal_outputs,
+                kval.item(), betaval.item()
+            )
             # Step 2: Given k and beta, find optimal X
             cur_X, acq_value = optimize_acqf(
-                halfVES, 
+                halfVES,
                 bounds=self.bounds.T,
                 q=1,  # Number of candidates to optimize for
                 num_restarts=5,
                 raw_samples=20,  # Initial samples for optimization
             )
-            if i % 10 == 0:
+            if i % 5 == 0:
                 print(f"Iteration {i}:")
                 print(f"K: {kval}; beta {betaval}; X:{cur_X}, AF value: {acq_value}")
         return cur_X, acq_value
-        
-    def generate_max_value_term(self, X: Tensor):
+
+    def generate_max_value_term(
+            self,
+            X: Tensor
+    ):
         """
         This function generate values of y^* - max(y_x, y^*_t) given
         position X and paths.
@@ -227,11 +262,14 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         """
         posterior_samples = self.paths(X.squeeze(1))
         improvement_term = torch.max(posterior_samples, self.best_f)
-        max_value_term = (self.optimal_outputs.squeeze(1) - improvement_term).clamp_min(1e-3) 
+        max_value_term = (self.optimal_outputs.squeeze(1) - improvement_term).clamp_min(1e-3)
         # This should be able to be logged, since it is per-sample
         return max_value_term
 
-    def find_k(self, max_value_term: Tensor):
+    def find_k(
+            self,
+            max_value_term: Tensor
+    ):
         """
         This function evaluates the optimal values of k and beta
         Args:
@@ -247,7 +285,10 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         beta_vals = k_vals / A
         return k_vals, beta_vals
 
-    def root_finding(self, x: Tensor):
+    def root_finding(
+            self,
+            x: Tensor
+    ):
         """
         Root finding function to solve Eq 3.9; Non-differentiable(?)
         """
@@ -255,46 +296,168 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         for i, xx in enumerate(x.flatten().detach().numpy()):
             res[i] = find_root_log_minus_digamma(torch.tensor(xx), initial_guess=torch.tensor(0.5))
         return torch.Tensor(res).reshape(x.shape)
-    
+
+
 if __name__ == "__main__":
     # Test VES on a trivial example (D=5)
-    from botorch.models import SingleTaskGP
-    from botorch.fit import fit_gpytorch_mll
-    from botorch.models.transforms.outcome import Standardize
-    from gpytorch.mlls import ExactMarginalLogLikelihood
-    from botorch.sampling.pathwise import draw_matheron_paths
-    from botorch.acquisition import ExpectedImprovement
-    from botorch.acquisition.max_value_entropy_search import qMaxValueEntropy
-    NUM_PATHS = 1024
 
-    N = 4
-    D = 5
-    train_X = torch.rand(N, D)
-    def f(X, noise=0.0):
-        return -torch.norm(torch.sin(15*X)*X, dim=1)**2
-    train_Y = f(train_X, noise=0.0).reshape(N, 1)
-    bounds = torch.zeros(D, 2)
-    bounds[:, 1] = 1
-    outcome_transform = Standardize(m=1)
-    gp = SingleTaskGP(train_X, train_Y, outcome_transform=outcome_transform) # gp model
-    mll = ExactMarginalLogLikelihood(gp.likelihood, gp) # mll object
-    _ = fit_gpytorch_mll(mll) # fit mll hyperpara
-    best_f = train_Y.max()
-    paths = draw_matheron_paths(gp, torch.Size([NUM_PATHS]))
-    ves_model = VariationalEntropySearchGamma(gp, best_f=best_f, bounds=bounds, paths=paths)
-    ei_model = ExpectedImprovement(gp, best_f)
+    argparse = ArgumentParser()
+    argparse.add_argument("--num_paths", type=int, default=1024)
+    argparse.add_argument("--num_iter", type=int, default=64)
+    argparse.add_argument("--num_restarts", type=int, default=5)
+    argparse.add_argument("--raw_samples", type=int, default=20)
+    argparse.add_argument("--n_init", type=int, default=20)
+    argparse.add_argument(
+        "--benchmark", type=str, choices=[
+            "lasso-dna",
+            "mopta08",
+            "svm",
+            "mujoco-ant",
+            "mujoco-humanoid",
+            "robotpushing",
+            "lasso-breastcancer",
+            "rover",
+            "hartmann6"
+        ],
+        required=True
+    )
 
+    args = argparse.parse_args()
+
+    NUM_PATHS = args.num_paths
+    benchmark_name = args.benchmark
+
+    match args.benchmark:
+        case "lasso-dna":
+            D = 180
+            TYPE = 'bencher'
+        case "mopta08":
+            D = 124
+            TYPE = 'bencher'
+        case "svm":
+            D = 388
+            TYPE = 'bencher'
+        case "mujoco-ant":
+            D = 888
+            TYPE = 'bencher'
+        case "mujoco-humanoid":
+            D = 6392
+            TYPE = 'bencher'
+        case "robotpushing":
+            D = 14
+            TYPE = 'bencher'
+        case "lasso-breastcancer":
+            D = 10
+            TYPE = 'bencher'
+        case "rover":
+            D = 60
+            TYPE = 'bencher'
+        case 'hartmann6':
+            D = 6
+            TYPE = 'botorch'
+        case _:
+            raise ValueError("Invalid benchmark")
+
+N = args.n_init
+train_x_ves = torch.rand(N, D, dtype=torch.double)
+train_x_ei = train_x_ves.clone()
+
+
+def f(
+        x: Tensor,
+):
+    if TYPE == 'botorch':
+        if args.benchmark == 'hartmann6':
+            _f = Hartmann(negate=True)
+            return _f(x)
+
+    elif TYPE == 'bencher':
+        stub = BencherStub(
+            grpc.insecure_channel(f"localhost:50051")
+        )
+        assert x.ndim in [1, 2], 'x must be 1D or 2D'
+        _x = x
+        if x.ndim == 2:
+            assert x.shape[0] == 1, 'x has to be essentially 1D'
+            _x = x.squeeze(0)
+        # add timeout to evaluation
+        n_retries = 0
+        failed = True
+        while n_retries < 10:
+            try:
+                res = stub.evaluate_point(
+                    BenchmarkRequest(
+                        benchmark=benchmark_name,
+                        point={
+                            'values': _x.tolist()
+                        }
+                    ),
+                )
+                failed = False
+                break
+            except Exception as e:
+                print(f'error: {e}')
+                n_retries += 1
+                if n_retries == 10 and failed:
+                    raise e
+                time.sleep(5)
+        # negate the result since we are maximizing
+        _res = -res.value
+        # to torch.double
+        return torch.tensor(_res, dtype=torch.double)
+    else:
+        raise ValueError("Invalid benchmark type")
+
+
+train_y_ves = torch.Tensor([f(x) for x in train_x_ves]).unsqueeze(1).to(torch.double)
+train_y_ei = train_y_ves.clone()
+bounds = torch.zeros(D, 2)
+bounds[:, 1] = 1
+outcome_transform_ves = Standardize(m=1)
+outcome_transform_ei = Standardize(m=1)
+gp_ves = SingleTaskGP(train_x_ves, train_y_ves, outcome_transform=outcome_transform_ves)  # gp model
+gp_ei = SingleTaskGP(train_x_ei, train_y_ei, outcome_transform=outcome_transform_ei)  # gp model
+mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
+mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
+fit_gpytorch_mll(mll_ves)  # fit mll hyperparameters
+fit_gpytorch_mll(mll_ei)  # fit mll hyperparameters
+paths = draw_matheron_paths(gp_ves, torch.Size([NUM_PATHS]))
+ves_model = VariationalEntropySearchGamma(gp_ves, best_f=train_y_ves.max(), bounds=bounds, paths=paths)
+ei_model = ExpectedImprovement(gp_ei, train_y_ei.max())
+
+for i in range(args.num_iter):
+    print(f"+++ Iteration {i} +++")
     # Define an intial point for VES-Gamma
     X = torch.rand(1, 1, D)
-    vescandidate, v = ves_model(X, num_iter=64)
-    print(vescandidate, v)
-    eicandidate, acq_value = optimize_acqf(
-        ei_model, 
+    ves_candidate, v = ves_model(X, num_iter=20)
+    ei_candidate, acq_value = optimize_acqf(
+        ei_model,
         bounds=bounds.T,
         q=1,  # Number of candidates to optimize for
-        num_restarts=5,
-        raw_samples=20,  # Initial samples for optimization
+        num_restarts=args.num_restarts,
+        raw_samples=args.raw_samples,  # Initial samples for optimization
     )
-    print(eicandidate, acq_value)
-    print(f(vescandidate).item(), f(eicandidate).item())
 
+    train_x_ves = torch.cat([train_x_ves, ves_candidate], dim=0)
+    train_x_ei = torch.cat([train_x_ei, ei_candidate], dim=0)
+
+    f_ves = f(ves_candidate)
+    f_ei = f(ei_candidate)
+
+    print(f"VES: cand={ves_candidate}, acq_val={v}, f_val={f_ves}")
+    print(f"EI: cand={ei_candidate}, acq_val={acq_value}, f_val={f_ei}")
+
+    train_y_ves = torch.cat([train_y_ves, f_ves.reshape(1, 1)], dim=0)
+    train_y_ei = torch.cat([train_y_ei, f_ei.reshape(1, 1)], dim=0)
+
+    outcome_transform_ves.train()
+    outcome_transform_ei.train()
+    gp_ves = SingleTaskGP(train_x_ves, train_y_ves, outcome_transform=outcome_transform_ves)  # gp model
+    gp_ei = SingleTaskGP(train_x_ei, train_y_ei, outcome_transform=outcome_transform_ei)  # gp model
+    mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
+    mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
+    fit_gpytorch_mll(mll_ves)  # fit mll hyperpara
+    fit_gpytorch_mll(mll_ei)  # fit mll hyperpara
+    paths = draw_matheron_paths(gp_ves, torch.Size([NUM_PATHS]))
+    ves_model = VariationalEntropySearchGamma(gp_ves, best_f=train_y_ves.max(), bounds=bounds, paths=paths)
+    ei_model = ExpectedImprovement(gp_ves, train_y_ei.max())
