@@ -70,9 +70,16 @@ def optimize_posterior_samples(
     
     return f_max.detach()
 
-def find_root_log_minus_digamma(intercept, initial_guess, tol=1e-5, max_iter=int(1e4)):
+def find_root_log_minus_digamma(
+        intercept, 
+        initial_guess, 
+        tol=1e-5, 
+        max_iter=int(1e3),
+        lower_bound=torch.tensor(1e-8),
+        upper_bound=torch.tensor(1e8)):
     """
-    Find a root of the function log(x) - digamma(x) - xx using Newton's method.
+    Find a root of the function log(x) - digamma(x) - intercept using a combination of
+    the bisection method and Newton's method.
 
     Args:
     intercept (float or tensor): The constant value to subtract in the function.
@@ -83,9 +90,33 @@ def find_root_log_minus_digamma(intercept, initial_guess, tol=1e-5, max_iter=int
     Returns:
     float or tensor: Approximate root of the function.
     """
-    x = initial_guess
-    for _ in range(max_iter):
-        value = torch.log(x) - digamma(x) - intercept
+    def f(x):
+        return torch.log(x) - digamma(x) - intercept
+
+    # Step 1: Bisection method
+    for _ in range(int(max_iter)):
+        midpoint = (lower_bound + upper_bound) / 2.0
+        f_mid = f(midpoint)
+
+        if torch.abs(f_mid) < tol:
+            return midpoint
+
+        # Narrow down the interval
+        if f(lower_bound) * f_mid < 0:
+            upper_bound = midpoint
+        else:
+            lower_bound = midpoint
+
+        # Switch to Newton's method when the interval is small enough
+        if torch.abs(upper_bound - lower_bound) < 1e-2:
+            x = midpoint
+            break
+    else:
+        x = initial_guess  # If bisection did not converge, use the initial guess
+
+    # Step 2: Newton's method
+    for _ in range(int(max_iter)):
+        value = f(x)
         derivative = 1/x - polygamma(1, x)  # derivative of the function
 
         # Newton's method update
@@ -96,8 +127,8 @@ def find_root_log_minus_digamma(intercept, initial_guess, tol=1e-5, max_iter=int
             return x_new
 
         x = x_new
-    print("The root finding method does not converge. \
-          A default value 1.0 is assigned on k.")
+
+    print("The root finding method does not converge. A default value 1.0 is assigned on k.")
     return torch.tensor(1.0)
 
 class HalfVESGamma(MCAcquisitionFunction):
