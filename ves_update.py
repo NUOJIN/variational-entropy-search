@@ -117,7 +117,7 @@ def find_root_log_minus_digamma(
 
         x = x_new
 
-    return torch.tensor(x)
+    return torch.tensor(1.0)
 
 
 class HalfVESGamma(MCAcquisitionFunction):
