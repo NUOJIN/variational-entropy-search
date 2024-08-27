@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import math
 import time
 from argparse import ArgumentParser
 from copy import deepcopy
 from typing import Any, Optional, Tuple, Union
 
+import scipy
 from botorch.test_functions import Hartmann
 import grpc
 import numpy as np
@@ -23,6 +25,7 @@ from botorch.optim import optimize_acqf
 from botorch.sampling import SobolEngine
 from botorch.sampling.pathwise import draw_matheron_paths
 from gpytorch.mlls import ExactMarginalLogLikelihood
+from scipy import optimize
 from torch import Tensor
 from torch.special import digamma, polygamma
 
@@ -83,13 +86,14 @@ def optimize_posterior_samples(
 
     return f_max.detach()
 
+
 def find_root_log_minus_digamma(
         intercept,
         initial_guess,
         tol=1e-5,
-        max_iter=int(1e3),
         lower_bound=torch.tensor(1e-8),
-        upper_bound=torch.tensor(1e8)):
+        upper_bound=torch.tensor(1e8)
+):
     """
     Find a root of the function log(x) - digamma(x) - intercept using a combination of
     the bisection method and Newton's method.
@@ -103,46 +107,23 @@ def find_root_log_minus_digamma(
     Returns:
     float or tensor: Approximate root of the function.
     """
-    def f(x):
-        return torch.log(x) - digamma(x) - intercept
 
-    # Step 1: Bisection method
-    for _ in range(int(max_iter)):
-        midpoint = (lower_bound + upper_bound) / 2.0
-        f_mid = f(midpoint)
+    def f(
+            x
+    ):
+        return math.log(x) - scipy.special.digamma(x) - intercept
 
-        if torch.abs(f_mid) < tol:
-            return midpoint
-
-        # Narrow down the interval
-        if f(lower_bound) * f_mid < 0:
-            upper_bound = midpoint
-        else:
-            lower_bound = midpoint
-
-        # Switch to Newton's method when the interval is small enough
-        if torch.abs(upper_bound - lower_bound) < 1e-2:
-            x = midpoint
-            break
+    root_finding_result = optimize.root_scalar(
+        f,
+        bracket=[lower_bound, upper_bound],
+        x0=initial_guess,
+        method='brentq',
+        rtol=tol
+    )
+    if root_finding_result.converged:
+        return root_finding_result.root
     else:
-        x = initial_guess  # If bisection did not converge, use the initial guess
-
-    # Step 2: Newton's method
-    for _ in range(int(max_iter)):
-        value = f(x)
-        derivative = 1/x - polygamma(1, x)  # derivative of the function
-
-        # Newton's method update
-        x_new = x - value / derivative
-
-        # Check for convergence
-        if torch.abs(x_new - x) < tol:
-            return x_new
-
-        x = x_new
-
-    print("The root finding method does not converge. A default value 1.0 is assigned on k.")
-    return torch.tensor(1.0)
+        return 1.0
 
 
 class HalfVESGamma(MCAcquisitionFunction):
@@ -319,7 +300,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         """
         res = np.zeros_like(x.flatten().detach().numpy())
         for i, xx in enumerate(x.flatten().detach().numpy()):
-            res[i] = find_root_log_minus_digamma(torch.tensor(xx), initial_guess=torch.tensor(0.5))
+            res[i] = find_root_log_minus_digamma(xx, initial_guess=0.5)
         return torch.Tensor(res).reshape(x.shape)
 
 
