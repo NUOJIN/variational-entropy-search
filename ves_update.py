@@ -30,7 +30,7 @@ from torch import Tensor
 from torch.special import digamma, polygamma
 
 
-# NUM_OPTIMA = 100
+CLAMP_MIN = 1e-10
 
 def optimize_posterior_samples(
         paths,
@@ -172,10 +172,10 @@ class HalfVESGamma(MCAcquisitionFunction):
         posterior_samples = self.paths(X.squeeze(1))
         improvement_term = torch.max(posterior_samples, self.best_f).unsqueeze(1)
         # This should be able to be logged, since it is per-sample
-        max_value_term = (self.optimal_outputs - improvement_term).clamp_min(1e-3)
+        max_value_term = (self.optimal_outputs - improvement_term).clamp_min(CLAMP_MIN)
         log_max_value = max_value_term.log()
-        max_value_mean = max_value_term.nanmean(0)
-        log_max_mean = log_max_value.nanmean(0)
+        max_value_mean = max_value_term.mean(0)
+        log_max_mean = log_max_value.mean(0)
 
         return ((self.k - 1) * log_max_mean + self.beta * max_value_mean).squeeze()
 
@@ -210,7 +210,8 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
     def forward(
             self,
             X,
-            num_iter: int = 64
+            num_iter: int = 64,
+            show_progress: bool = True
     ):
         """
         This VES class implements VES-Gamma, a special case of VES. 
@@ -246,9 +247,15 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 bounds=self.bounds.T,
                 q=1,  # Number of candidates to optimize for
                 num_restarts=5,
-                raw_samples=20,  # Initial samples for optimization
+                raw_samples=1024,  # Initial samples for optimization
+                options={"sample_around_best": True}
             )
-            if i % 5 == 0:
+            self.path = draw_matheron_paths(self.model, torch.Size([NUM_PATHS]))
+            self.optimal_outputs = optimize_posterior_samples(
+                self.paths,
+                self.bounds
+            )
+            if show_progress and i % 100 == 0:
                 print(f"Iteration {i}:")
                 print(f"K: {kval}; beta {betaval}; X:{cur_X}, AF value: {acq_value}")
         return cur_X, acq_value
@@ -268,7 +275,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         """
         posterior_samples = self.paths(X.squeeze(1))
         improvement_term = torch.max(posterior_samples, self.best_f)
-        max_value_term = (self.optimal_outputs.squeeze(1) - improvement_term).clamp_min(1e-3)
+        max_value_term = (self.optimal_outputs.squeeze(1) - improvement_term).clamp_min(CLAMP_MIN)
         # This should be able to be logged, since it is per-sample
         return max_value_term
 
@@ -284,8 +291,8 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             k_vals: q x batch_size
             beta_vals: q x batch_size
         """
-        A = max_value_term.nanmean(dim=0)
-        B = (torch.log(max_value_term)).nanmean(dim=0)
+        A = max_value_term.mean(dim=0)
+        B = (torch.log(max_value_term)).mean(dim=0)
         self.v = torch.log(A) - B
         k_vals = self.root_finding(self.v)
         beta_vals = k_vals / A
@@ -299,8 +306,8 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         Root finding function to solve Eq 3.9; Non-differentiable(?)
         """
         res = np.zeros_like(x.flatten().detach().numpy())
-        for i, xx in enumerate(x.flatten().detach().numpy()):
-            res[i] = find_root_log_minus_digamma(xx, initial_guess=0.5)
+        for i, intercept in enumerate(x.flatten().detach().numpy()):
+            res[i] = find_root_log_minus_digamma(intercept, initial_guess=0.5)
         return torch.Tensor(res).reshape(x.shape)
 
 
