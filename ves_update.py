@@ -235,7 +235,6 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             best_f: Union[float, Tensor],
             paths,
             clamp_min: float,
-            exponential_family: bool = False,
             optimize_acqf_options: dict[str, Any] | None = None,
             bounds: Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
             **kwargs: Any,
@@ -264,7 +263,6 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 "options"     : {"sample_around_best": True}
             }
         self.optimize_acqf_options = optimize_acqf_options
-        self.exponential_family = exponential_family
 
     def forward(
             self,
@@ -300,7 +298,6 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 self.optimal_outputs,
                 kval.item(),
                 betaval.item(),
-                self.exponential_family,
                 self.clamp_min
             )
             # Step 2: Given k and beta, find optimal X
@@ -380,7 +377,6 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
             best_f: Union[float, Tensor],
             paths,
             clamp_min: float,
-            exponential_family: bool = False,
             optimize_acqf_options: dict[str, Any] | None = None,
             bounds: Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
             **kwargs: Any,
@@ -524,7 +520,10 @@ if __name__ == "__main__":
     benchmark_name = args.benchmark
     clamp_min = args.clamp_min
     run_ei = args.run_ei
-    exponential_family = args.exponential_family
+    if args.exponential_family:
+        ves_class = VariationalEntropySearchExponential
+    else:
+        ves_class = VariationalEntropySearchGamma
     acqf_options = {
         "num_restarts": args.acqf_num_restarts,
         "raw_samples" : args.acqf_raw_samples,
@@ -643,14 +642,13 @@ if __name__ == "__main__":
         mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
         fit_gpytorch_mll(mll_ves)  # fit mll hyperparameters
         paths = draw_matheron_paths(gp_ves, torch.Size([num_paths]))
-        ves_model = VariationalEntropySearchGamma(
+        ves_model = ves_class(
             gp_ves,
             best_f=train_y_ves.max(),
             bounds=bounds,
             paths=paths,
             clamp_min=clamp_min,
             acqf_options=acqf_options,
-            exponential_family=exponential_family
         )
         k_vals = []
         beta_vals = []
@@ -703,12 +701,11 @@ if __name__ == "__main__":
             fit_gpytorch_mll(mll_ves)  # fit mll hyperpara
 
             paths = draw_matheron_paths(gp_ves, torch.Size([num_paths]))
-            ves_model = VariationalEntropySearchGamma(
+            ves_model = ves_class(
                 gp_ves,
                 best_f=train_y_ves.max(),
                 bounds=bounds,
                 paths=paths,
                 clamp_min=clamp_min,
                 acqf_options=acqf_options,
-                exponential_family=exponential_family
             )
