@@ -470,8 +470,12 @@ if __name__ == "__main__":
                 _f = Hartmann(negate=True)
                 return _f(x)
             elif args.benchmark == 'branin2':
+
+                branin_bounds = torch.tensor([[-5, 10], [0, 15]])
+                x_eval = x * (branin_bounds[1] - branin_bounds[0]) + branin_bounds[0]
+
                 _f = Branin(negate=True)
-                return _f(x)
+                return _f(x_eval)
 
         elif TYPE == 'bencher':
             stub = BencherStub(
@@ -590,4 +594,4 @@ if __name__ == "__main__":
             clamp_min=clamp_min,
             acqf_options=acqf_options
         )
-        ei_model = LogExpectedImprovement(gp_ves, train_y_ei.max())
+        ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
