@@ -40,7 +40,15 @@ def get_gp(
         train_y: Tensor,
 ) -> SingleTaskGP:
     """
-    Get a noiseless GP model with Matern kernel and Gamma prior on the lengthscale.
+    Get a GP model with a Matern kernel and Gamma prior on the lengthscale.
+
+    Args:
+        train_x: the training x data
+        train_y: the training y data
+
+    Returns:
+        SingleTaskGP: the GP model
+
     """
     outcome_transform = Standardize(m=1)
     covar_module = ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=GammaPrior(1.5, 0.1)))
@@ -305,7 +313,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 self.paths,
                 self.bounds
             )
-            if show_progress and i % 100 == 0:
+            if show_progress and i % 5 == 0:
                 print(f"Iteration {i}:")
                 print(f"K: {kval.item():.3e}; beta {betaval.item():.3e}; AF value: {acq_value:.3e}")
         return cur_X, acq_value, kval.item(), betaval.item()
@@ -368,8 +376,6 @@ if __name__ == "__main__":
     argparse.add_argument("--num_paths", type=int, default=64, help="Number of paths to sample")
     argparse.add_argument("--num_iter", type=int, default=20, help="Number of iterations for VES")
     argparse.add_argument("--num_bo_iter", type=int, default=500)
-    argparse.add_argument("--num_restarts", type=int, default=5)
-    argparse.add_argument("--raw_samples", type=int, default=20)
     argparse.add_argument("--n_init", type=int, default=20)
     argparse.add_argument("--clamp_min", type=float, default=1e-10)
     argparse.add_argument("--acqf_raw_samples", type=int, default=512)
@@ -540,8 +546,8 @@ if __name__ == "__main__":
             ei_model,
             bounds=bounds.T,
             q=1,  # Number of candidates to optimize for
-            num_restarts=args.num_restarts,
-            raw_samples=args.raw_samples,  # Initial samples for optimization
+            num_restarts=args.acqf_num_restarts,
+            raw_samples=args.acqf_raw_samples,
         )
 
         train_x_ves = torch.cat([train_x_ves, ves_candidate], dim=0)
