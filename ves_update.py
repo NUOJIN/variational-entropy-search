@@ -417,12 +417,8 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
             show_progress: bool = True
     ):
         """
-        This VES class implements VES-Gamma, a special case of VES. 
-        There are two steps: the first step is to design a new halfVES class, which
-        is uniquely specified by the value of k and beta. A optimize_acqf optimizer 
-        is implemented to find its optimal candidate. The second step is to use this
-        selected optimal candidate to find the next k and beta, and generate a new 
-        halfVES class. The iteration is repeated num_iter times.
+        This VES class implements VES-Exp, a special case of VES, and expected to be
+        equivalent to EI. 
         Args:
             X: The initial value for X batch_size x q x dim
             num_iter: number of iterations
@@ -433,7 +429,10 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
         assert num_iter > 0, "Number of iterations should be positive"
 
         cur_X = X
-        kval, betaval = torch.tensor(1.0), torch.tensor(1.0)
+        # solve beta (or lambda)
+        max_value_term = self.generate_max_value_term(cur_X)
+        betaval = torch.reciprocal(max_value_term.mean(dim=0))
+        kval = torch.ones_like(betaval)
         halfVES = HalfVESGamma(
             self.model,
             self.best_f,
