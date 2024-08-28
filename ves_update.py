@@ -16,11 +16,9 @@ import torch
 from bencherscaffold.bencher_pb2 import BenchmarkRequest
 from bencherscaffold.bencher_pb2_grpc import BencherStub
 from botorch.acquisition import LogExpectedImprovement
-# from tqdm import tqdm
 from botorch.acquisition.monte_carlo import MCAcquisitionFunction
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
-# from botorch.utils.sampling import optimize_posterior_samples
 from botorch.models.model import Model
 from botorch.models.transforms.outcome import Standardize
 from botorch.models.utils.gpytorch_modules import get_gaussian_likelihood_with_gamma_prior
@@ -51,7 +49,13 @@ def get_gp(
 
     """
     outcome_transform = Standardize(m=1)
-    covar_module = ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=GammaPrior(1.5, 0.1)))
+    covar_module = ScaleKernel(
+        MaternKernel(
+            nu=2.5,
+            ard_num_dims=D,
+            lengthscale_prior=GammaPrior(1.5, 0.1)
+        )
+    )
     likelihood = get_gaussian_likelihood_with_gamma_prior()
     likelihood.noise = 1e-4
     likelihood.raw_noise.requires_grad = False
@@ -180,7 +184,6 @@ class HalfVESGamma(MCAcquisitionFunction):
             optimal_outputs: Tensor,
             k: Union[float, Tensor],
             beta: Union[float, Tensor],
-            exponential_family: bool = False,
             clamp_min: float = 1e-10
     ):
         """
@@ -205,7 +208,6 @@ class HalfVESGamma(MCAcquisitionFunction):
         # Assign optimal outputs y^*
         self.optimal_outputs = optimal_outputs
         self.clamp_min = clamp_min
-        self.exponential_family=exponential_family
 
     def forward(
             self,
@@ -226,10 +228,7 @@ class HalfVESGamma(MCAcquisitionFunction):
         log_max_value = max_value_term.log()
         max_value_mean = max_value_term.mean(0)
         log_max_mean = log_max_value.mean(0)
-        if self.exponential_family:
-            return (self.beta * max_value_mean).squeeze()
-        else:
-            return ((self.k - 1) * log_max_mean  + self.beta * max_value_mean).squeeze()
+        return ((self.k - 1) * log_max_mean + self.beta * max_value_mean).squeeze()
 
 
 class VariationalEntropySearchGamma(MCAcquisitionFunction):
@@ -305,7 +304,6 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 self.optimal_outputs,
                 kval.item(),
                 betaval.item(),
-                self.exponential_family,
                 self.clamp_min
             )
             # Step 2: Given k and beta, find optimal X
@@ -323,7 +321,6 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             if show_progress and i % 5 == 0:
                 print(f"Iteration {i}: K: {kval.item():.3e}; beta {betaval.item():.3e}; AF value: {acq_value:.3e}")
         return cur_X, acq_value, kval.item(), betaval.item()
-
 
     def generate_max_value_term(
             self,
@@ -344,7 +341,6 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         # This should be able to be logged, since it is per-sample
         return max_value_term
 
-
     def find_k(
             self,
             max_value_term: Tensor
@@ -358,10 +354,15 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             beta_vals: q x batch_size
         """
         A = max_value_term.mean(dim=0)
-        B = (torch.log(max_value_term)).mean(dim=0)
-        self.v = torch.log(A) - B
-        k_vals = self.root_finding(self.v)
+        if not self.exponential_family:
+            B = (torch.log(max_value_term)).mean(dim=0)
+            v = torch.log(A) - B
+            k_vals = self.root_finding(v)
+
+        else:
+            k_vals = torch.ones_like(A)
         beta_vals = k_vals / A
+
         return k_vals, beta_vals
 
 
