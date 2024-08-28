@@ -1,0 +1,47 @@
+Bootstrap: docker
+From: gaunab/bencher:latest
+Stage: build
+
+%environment
+    export LANG=C.UTF-8
+    export PATH="/root/.local/bin:$PATH"
+
+%files
+    ./ves_update.py /opt/variational-entropy-search/
+    ./requirements.txt /opt/variational-entropy-search/
+
+%post
+    apt update -y
+    # apt install git curl -y
+
+    cd /opt/variational-entropy-search
+    rm -rf runs/* || true
+    rm -rf runs2/* || true
+    rm -rf results/* || true
+    rm *.sif || true
+    rm -rf .idea || true
+    rm -r notebooks || true
+    rm -r .git || true
+    rm -r .ipynb_checkpoints || true
+    rm -r figures || true
+    rm -r runs || true
+
+    pip install -r requirements.txt
+
+    # remove build dependencies
+    apt remove git curl -y
+    apt autoremove -y
+
+    # clean up
+    rm -rf /var/lib/apt/lists/*
+    rm -rf /root/.cache/pip/*
+
+
+%startscript
+    echo "Starting container"
+    bash -c "python3.11 /entrypoint.py"
+
+%runscript
+    echo "Container was created"
+    echo "Arguments received: $*"
+    bash -c "PATH='/opt/poetry/bin:$PATH' cd /opt/variational-entropy-search && python3 ves_update.py $*"
