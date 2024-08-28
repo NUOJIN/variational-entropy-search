@@ -222,9 +222,9 @@ class HalfVESGamma(MCAcquisitionFunction):
         # This should be able to be logged, since it is per-sample
         max_value_term = (self.optimal_outputs - improvement_term).clamp_min(self.clamp_min)
         log_max_value = max_value_term.log()
-        max_value_mean = max_value_term.mean(0)
+        improvement_mean = improvement_term.mean(0)
         log_max_mean = log_max_value.mean(0)
-        return ((self.k - 1) * log_max_mean  + self.beta * max_value_mean).squeeze()
+        return ((self.k - 1) * log_max_mean + self.beta * improvement_mean).squeeze()
 
 
 class VariationalEntropySearchGamma(MCAcquisitionFunction):
@@ -409,8 +409,7 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
     def forward(
             self,
             X,
-            num_iter: int = 64,
-            show_progress: bool = True
+            num_iter: int = 64
     ):
         """
         This VES class implements VES-Exp, a special case of VES, and expected to be
@@ -426,8 +425,7 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
 
         cur_X = X
         # solve beta (or lambda)
-        max_value_term = self.generate_max_value_term(cur_X)
-        betaval = torch.reciprocal(max_value_term.mean(dim=0))
+        betaval = torch.ones(cur_X.shape[0])
         kval = torch.ones_like(betaval)
         halfVES = HalfVESGamma(
             self.model,
@@ -566,9 +564,10 @@ if __name__ == "__main__":
 
     n_init = args.n_init
     train_x_ves = torch.rand(n_init, D, dtype=torch.double)
+    
     if run_ei:
         train_x_ei = train_x_ves.clone()
-        del train_x_ves
+#        del train_x_ves
 
 
     def f(
@@ -622,7 +621,6 @@ if __name__ == "__main__":
             return torch.tensor(_res, dtype=torch.double)
         else:
             raise ValueError("Invalid benchmark type")
-
 
     train_y_ves = torch.Tensor([f(x) for x in train_x_ves]).unsqueeze(1).to(torch.double)
     if run_ei:
