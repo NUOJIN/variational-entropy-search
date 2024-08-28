@@ -23,13 +23,39 @@ from botorch.models import SingleTaskGP
 # from botorch.utils.sampling import optimize_posterior_samples
 from botorch.models.model import Model
 from botorch.models.transforms.outcome import Standardize
+from botorch.models.utils.gpytorch_modules import get_gaussian_likelihood_with_gamma_prior
 from botorch.optim import optimize_acqf
 from botorch.sampling import SobolEngine
 from botorch.sampling.pathwise import draw_matheron_paths
-from botorch.test_functions import Hartmann
+from botorch.test_functions import Hartmann, Branin
+from gpytorch.kernels import ScaleKernel, MaternKernel
 from gpytorch.mlls import ExactMarginalLogLikelihood
+from gpytorch.priors import GammaPrior
 from scipy import optimize
 from torch import Tensor
+
+
+def get_gp(
+        train_x: Tensor,
+        train_y: Tensor,
+) -> SingleTaskGP:
+    """
+    Get a noiseless GP model with Matern kernel and Gamma prior on the lengthscale.
+    """
+    outcome_transform = Standardize(m=1)
+    covar_module = ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=GammaPrior(1.5, 0.1)))
+    likelihood = get_gaussian_likelihood_with_gamma_prior()
+    likelihood.noise = 1e-4
+    likelihood.raw_noise.requires_grad = False
+
+    gp = SingleTaskGP(
+        train_x,
+        train_y,
+        outcome_transform=outcome_transform,
+        covar_module=covar_module,
+        likelihood=likelihood
+    )
+    return gp
 
 
 def str2bool(
@@ -340,7 +366,7 @@ if __name__ == "__main__":
 
     argparse = ArgumentParser()
     argparse.add_argument("--num_paths", type=int, default=64, help="Number of paths to sample")
-    argparse.add_argument("--num_iter", type=int, default=64, help="Number of iterations for VES")
+    argparse.add_argument("--num_iter", type=int, default=20, help="Number of iterations for VES")
     argparse.add_argument("--num_bo_iter", type=int, default=500)
     argparse.add_argument("--num_restarts", type=int, default=5)
     argparse.add_argument("--raw_samples", type=int, default=20)
@@ -360,7 +386,8 @@ if __name__ == "__main__":
             "robotpushing",
             "lasso-breastcancer",
             "rover",
-            "hartmann6"
+            "hartmann6",
+            "branin2"
         ],
         required=True
     )
@@ -418,6 +445,9 @@ if __name__ == "__main__":
         case 'hartmann6':
             D = 6
             TYPE = 'botorch'
+        case 'branin2':
+            D = 2
+            TYPE = 'botorch'
         case _:
             raise ValueError("Invalid benchmark")
 
@@ -432,6 +462,9 @@ if __name__ == "__main__":
         if TYPE == 'botorch':
             if args.benchmark == 'hartmann6':
                 _f = Hartmann(negate=True)
+                return _f(x)
+            elif args.benchmark == 'branin2':
+                _f = Branin(negate=True)
                 return _f(x)
 
         elif TYPE == 'bencher':
@@ -476,10 +509,8 @@ if __name__ == "__main__":
     train_y_ei = train_y_ves.clone()
     bounds = torch.zeros(D, 2)
     bounds[:, 1] = 1
-    outcome_transform_ves = Standardize(m=1)
-    outcome_transform_ei = Standardize(m=1)
-    gp_ves = SingleTaskGP(train_x_ves, train_y_ves, outcome_transform=outcome_transform_ves)  # gp model
-    gp_ei = SingleTaskGP(train_x_ei, train_y_ei, outcome_transform=outcome_transform_ei)  # gp model
+    gp_ves = get_gp(train_x_ves, train_y_ves)
+    gp_ei = get_gp(train_x_ei, train_y_ei)
     mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
     mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
     fit_gpytorch_mll(mll_ves)  # fit mll hyperparameters
@@ -538,10 +569,8 @@ if __name__ == "__main__":
         np.save(f"runs/{run_dir}/k_vals.npy", np.array(k_vals))
         np.save(f"runs/{run_dir}/beta_vals.npy", np.array(beta_vals))
 
-        outcome_transform_ves.train()
-        outcome_transform_ei.train()
-        gp_ves = SingleTaskGP(train_x_ves, train_y_ves, outcome_transform=outcome_transform_ves)  # gp model
-        gp_ei = SingleTaskGP(train_x_ei, train_y_ei, outcome_transform=outcome_transform_ei)  # gp model
+        gp_ves = get_gp(train_x_ves, train_y_ves)
+        gp_ei = get_gp(train_x_ei, train_y_ei)
         mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
         mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
         fit_gpytorch_mll(mll_ves)  # fit mll hyperpara
