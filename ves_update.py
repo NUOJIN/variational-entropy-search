@@ -180,6 +180,7 @@ class HalfVESGamma(MCAcquisitionFunction):
             optimal_outputs: Tensor,
             k: Union[float, Tensor],
             beta: Union[float, Tensor],
+            exponential_family: bool = False,
             clamp_min: float = 1e-10
     ):
         """
@@ -204,6 +205,7 @@ class HalfVESGamma(MCAcquisitionFunction):
         # Assign optimal outputs y^*
         self.optimal_outputs = optimal_outputs
         self.clamp_min = clamp_min
+        self.exponential_family=exponential_family
 
     def forward(
             self,
@@ -224,8 +226,10 @@ class HalfVESGamma(MCAcquisitionFunction):
         log_max_value = max_value_term.log()
         max_value_mean = max_value_term.mean(0)
         log_max_mean = log_max_value.mean(0)
-
-        return ((self.k - 1) * log_max_mean + self.beta * max_value_mean).squeeze()
+        if self.exponential_family:
+            return (self.beta * max_value_mean).squeeze()
+        else:
+            return ((self.k - 1) * log_max_mean  + self.beta * max_value_mean).squeeze()
 
 
 class VariationalEntropySearchGamma(MCAcquisitionFunction):
@@ -236,6 +240,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             best_f: Union[float, Tensor],
             paths,
             clamp_min: float,
+            exponential_family: bool = False,
             optimize_acqf_options: dict[str, Any] | None = None,
             bounds: Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
             **kwargs: Any,
@@ -264,6 +269,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 "options"     : {"sample_around_best": True}
             }
         self.optimize_acqf_options = optimize_acqf_options
+        self.exponential_family = exponential_family
 
     def forward(
             self,
@@ -299,6 +305,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 self.optimal_outputs,
                 kval.item(),
                 betaval.item(),
+                self.exponential_family,
                 self.clamp_min
             )
             # Step 2: Given k and beta, find optimal X
@@ -308,15 +315,15 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 q=1,  # Number of candidates to optimize for
                 **self.optimize_acqf_options
             )
-            self.path = draw_matheron_paths(self.model, torch.Size([NUM_PATHS]))
+            self.paths = draw_matheron_paths(self.model, torch.Size([num_paths]))
             self.optimal_outputs = optimize_posterior_samples(
                 self.paths,
                 self.bounds
             )
             if show_progress and i % 5 == 0:
-                print(f"Iteration {i}:")
-                print(f"K: {kval.item():.3e}; beta {betaval.item():.3e}; AF value: {acq_value:.3e}")
+                print(f"Iteration {i}: K: {kval.item():.3e}; beta {betaval.item():.3e}; AF value: {acq_value:.3e}")
         return cur_X, acq_value, kval.item(), betaval.item()
+
 
     def generate_max_value_term(
             self,
@@ -337,6 +344,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         # This should be able to be logged, since it is per-sample
         return max_value_term
 
+
     def find_k(
             self,
             max_value_term: Tensor
@@ -356,6 +364,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         beta_vals = k_vals / A
         return k_vals, beta_vals
 
+
     def root_finding(
             self,
             x: Tensor
@@ -374,13 +383,15 @@ if __name__ == "__main__":
 
     argparse = ArgumentParser()
     argparse.add_argument("--num_paths", type=int, default=64, help="Number of paths to sample")
-    argparse.add_argument("--num_iter", type=int, default=20, help="Number of iterations for VES")
+    argparse.add_argument("--num_iter", type=int, default=50, help="Number of iterations for VES")
     argparse.add_argument("--num_bo_iter", type=int, default=500)
     argparse.add_argument("--n_init", type=int, default=20)
     argparse.add_argument("--clamp_min", type=float, default=1e-10)
     argparse.add_argument("--acqf_raw_samples", type=int, default=512)
     argparse.add_argument("--acqf_num_restarts", type=int, default=5)
     argparse.add_argument("--sample_around_best", type=str2bool, default=True)
+    argparse.add_argument("--run_ei", type=str2bool, default=False)
+    argparse.add_argument("--exponential_family", type=str2bool, default=False)
 
     argparse.add_argument(
         "--benchmark", type=str, choices=[
@@ -414,9 +425,11 @@ if __name__ == "__main__":
     with open(f"runs/{run_dir}/args.json", "w") as f:
         json.dump(args_dir, f)
 
-    NUM_PATHS = args.num_paths
+    num_paths = args.num_paths
     benchmark_name = args.benchmark
     clamp_min = args.clamp_min
+    run_ei = args.run_ei
+    exponential_family = args.exponential_family
     acqf_options = {
         "num_restarts": args.acqf_num_restarts,
         "raw_samples" : args.acqf_raw_samples,
@@ -459,7 +472,9 @@ if __name__ == "__main__":
 
     n_init = args.n_init
     train_x_ves = torch.rand(n_init, D, dtype=torch.double)
-    train_x_ei = train_x_ves.clone()
+    if run_ei:
+        train_x_ei = train_x_ves.clone()
+        del train_x_ves
 
 
     def f(
@@ -516,82 +531,89 @@ if __name__ == "__main__":
 
 
     train_y_ves = torch.Tensor([f(x) for x in train_x_ves]).unsqueeze(1).to(torch.double)
-    train_y_ei = train_y_ves.clone()
+    if run_ei:
+        train_y_ei = train_y_ves.clone()
+        del train_y_ves
+
     bounds = torch.zeros(D, 2)
     bounds[:, 1] = 1
-    gp_ves = get_gp(train_x_ves, train_y_ves)
-    gp_ei = get_gp(train_x_ei, train_y_ei)
-    mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
-    mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
-    fit_gpytorch_mll(mll_ves)  # fit mll hyperparameters
-    fit_gpytorch_mll(mll_ei)  # fit mll hyperparameters
-    paths = draw_matheron_paths(gp_ves, torch.Size([NUM_PATHS]))
-    ves_model = VariationalEntropySearchGamma(
-        gp_ves,
-        best_f=train_y_ves.max(),
-        bounds=bounds,
-        paths=paths,
-        clamp_min=clamp_min,
-        acqf_options=acqf_options
-    )
-    ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
 
-    k_vals = []
-    beta_vals = []
-
-    for i in range(args.num_bo_iter):
-        print(f"+++ Iteration {i} +++")
-        # Define an intial point for VES-Gamma
-        X = torch.rand(1, 1, D)
-        ves_candidate, v, k_val, beta_val = ves_model(X, num_iter=args.num_iter)
-        k_vals.append(k_val)
-        beta_vals.append(beta_val)
-        ei_candidate, acq_value = optimize_acqf(
-            ei_model,
-            bounds=bounds.T,
-            q=1,  # Number of candidates to optimize for
-            num_restarts=args.acqf_num_restarts,
-            raw_samples=args.acqf_raw_samples,
-        )
-
-        train_x_ves = torch.cat([train_x_ves, ves_candidate], dim=0)
-        train_x_ei = torch.cat([train_x_ei, ei_candidate], dim=0)
-
-        f_ves = f(ves_candidate)
-        f_ei = f(ei_candidate)
-
-        print(f"VES: cand={ves_candidate}, acq_val={v:.3e}, f_val={f_ves.item():.3e}")
-        print(f"EI: cand={ei_candidate}, acq_val={acq_value:.3e}, f_val={f_ei.item():.3e}")
-
-        train_y_ves = torch.cat([train_y_ves, f_ves.reshape(1, 1)], dim=0)
-        train_y_ei = torch.cat([train_y_ei, f_ei.reshape(1, 1)], dim=0)
-
-        # save the results
-        # torch.save(train_x_ves, f"runs/{run_dir}/train_x_ves.pt")
-        # torch.save(train_x_ei, f"runs/{run_dir}/train_x_ei.pt")
-        # torch.save(train_y_ves, f"runs/{run_dir}/train_y_ves.pt")
-        # torch.save(train_y_ei, f"runs/{run_dir}/train_y_ei.pt")
-        np.save(f"runs/{run_dir}/train_x_ves.npy", train_x_ves.detach().numpy())
-        np.save(f"runs/{run_dir}/train_x_ei.npy", train_x_ei.detach().numpy())
-        np.save(f"runs/{run_dir}/train_y_ves.npy", train_y_ves.detach().numpy())
-        np.save(f"runs/{run_dir}/train_y_ei.npy", train_y_ei.detach().numpy())
-        # save k_vals and beta_vals
-        np.save(f"runs/{run_dir}/k_vals.npy", np.array(k_vals))
-        np.save(f"runs/{run_dir}/beta_vals.npy", np.array(beta_vals))
-
-        gp_ves = get_gp(train_x_ves, train_y_ves)
+    if run_ei:
         gp_ei = get_gp(train_x_ei, train_y_ei)
-        mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
         mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
-        fit_gpytorch_mll(mll_ves)  # fit mll hyperpara
-        fit_gpytorch_mll(mll_ei)  # fit mll hyperpara
-        paths = draw_matheron_paths(gp_ves, torch.Size([NUM_PATHS]))
+        fit_gpytorch_mll(mll_ei)  # fit mll hyperparameters
+        ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
+    else:
+        gp_ves = get_gp(train_x_ves, train_y_ves)
+        mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
+        fit_gpytorch_mll(mll_ves)  # fit mll hyperparameters
+        paths = draw_matheron_paths(gp_ves, torch.Size([num_paths]))
         ves_model = VariationalEntropySearchGamma(
             gp_ves,
             best_f=train_y_ves.max(),
             bounds=bounds,
             paths=paths,
             clamp_min=clamp_min,
-            acqf_options=acqf_options
+            acqf_options=acqf_options,
+            exponential_family=exponential_family
         )
-        ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
+        k_vals = []
+        beta_vals = []
+
+    for i in range(args.num_bo_iter):
+        print(f"+++ Iteration {i} +++")
+        # Define an intial point for VES-Gamma
+        X = torch.rand(1, 1, D)
+        if run_ei:
+            ei_candidate, acq_value = optimize_acqf(
+                ei_model,
+                bounds=bounds.T,
+                q=1,  # Number of candidates to optimize for
+                num_restarts=args.acqf_num_restarts,
+                raw_samples=args.acqf_raw_samples,
+            )
+            train_x_ei = torch.cat([train_x_ei, ei_candidate], dim=0)
+            f_ei = f(ei_candidate)
+            print(
+                f"EI: cand={ei_candidate}, acq_val={acq_value:.3e}, f_val={f_ei.item():.3e}, f_max={train_y_ei.max()}"
+            )
+            train_y_ei = torch.cat([train_y_ei, f_ei.reshape(1, 1)], dim=0)
+            # save the results
+            np.save(f"runs/{run_dir}/train_x_ei.npy", train_x_ei.detach().numpy())
+            np.save(f"runs/{run_dir}/train_y_ei.npy", train_y_ei.detach().numpy())
+
+            gp_ei = get_gp(train_x_ei, train_y_ei)
+            mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
+            fit_gpytorch_mll(mll_ei)  # fit mll hyperpara
+            ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
+        else:
+            ves_candidate, v, k_val, beta_val = ves_model(X, num_iter=args.num_iter)
+            k_vals.append(k_val)
+            beta_vals.append(beta_val)
+            train_x_ves = torch.cat([train_x_ves, ves_candidate], dim=0)
+            f_ves = f(ves_candidate)
+            print(f"VES: cand={ves_candidate}, acq_val={v:.3e}, f_val={f_ves.item():.3e}, f_max={train_y_ves.max()}")
+            train_y_ves = torch.cat([train_y_ves, f_ves.reshape(1, 1)], dim=0)
+            # save the results
+            np.save(f"runs/{run_dir}/train_x_ves.npy", train_x_ves.detach().numpy())
+            np.save(f"runs/{run_dir}/train_y_ves.npy", train_y_ves.detach().numpy())
+
+            # save k_vals and beta_vals
+            np.save(f"runs/{run_dir}/k_vals.npy", np.array(k_vals))
+            np.save(f"runs/{run_dir}/beta_vals.npy", np.array(beta_vals))
+
+            gp_ves = get_gp(train_x_ves, train_y_ves)
+
+            mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
+            fit_gpytorch_mll(mll_ves)  # fit mll hyperpara
+
+            paths = draw_matheron_paths(gp_ves, torch.Size([num_paths]))
+            ves_model = VariationalEntropySearchGamma(
+                gp_ves,
+                best_f=train_y_ves.max(),
+                bounds=bounds,
+                paths=paths,
+                clamp_min=clamp_min,
+                acqf_options=acqf_options,
+                exponential_family=exponential_family
+            )
