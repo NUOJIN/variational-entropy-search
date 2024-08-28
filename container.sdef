@@ -11,9 +11,6 @@ Stage: build
     ./requirements.txt /opt/variational-entropy-search/
 
 %post
-    apt update -y
-    # apt install git curl -y
-
     cd /opt/variational-entropy-search
     rm -rf runs/* || true
     rm -rf runs2/* || true
@@ -27,10 +24,6 @@ Stage: build
     rm -r runs || true
 
     pip install -r requirements.txt
-
-    # remove build dependencies
-    apt remove git curl -y
-    apt autoremove -y
 
     # clean up
     rm -rf /var/lib/apt/lists/*
