@@ -5,8 +5,11 @@ import math
 import os
 import time
 from argparse import ArgumentParser
+from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any, Optional, Tuple, Union
+from enum import Enum
+from functools import partial
+from typing import Any, Optional, Tuple, Union, Callable
 from zlib import adler32
 
 import grpc
@@ -35,9 +38,173 @@ from scipy import optimize
 from torch import Tensor
 
 
+@contextmanager
+def torch_random_seed(
+        seed: int,
+):
+    """
+    Sets the random seed for torch operations within the context.
+
+    Parameters:
+    seed (int): The random seed to be set.
+
+    This function sets the random seed for torch operations within the context. After the context is exited, the random
+    seed is reset to its original value.
+    """
+    torch_state = torch.random.get_rng_state()
+    torch.manual_seed(seed)
+    try:
+        yield
+    finally:
+        torch.random.set_rng_state(torch_state)
+
+
+class BenchmarkType(Enum):
+    BOTORCH = 1
+    BENCHER = 2
+    GP_PRIOR_SAMPLE = 3
+
+
+def get_objective(
+        benchmark_name: str,
+) -> Tuple[Callable[[Tensor], Tensor], int]:
+    """
+
+    Args:
+        benchmark_name (str): the name of the benchmark
+
+    Returns:
+        Tuple[Callable[[Tensor], Tensor], int]: the objective function and the dimensionality of the problem
+
+    """
+
+    match benchmark_name:
+        case "lasso-dna":
+            benchmark_dim = 180
+            benchmark_type = BenchmarkType.BENCHER
+        case "mopta08":
+            benchmark_dim = 124
+            benchmark_type = BenchmarkType.BENCHER
+        case "svm":
+            benchmark_dim = 388
+            benchmark_type = BenchmarkType.BENCHER
+        case "mujoco-ant":
+            benchmark_dim = 888
+            benchmark_type = BenchmarkType.BENCHER
+        case "mujoco-humanoid":
+            benchmark_dim = 6392
+            benchmark_type = BenchmarkType.BENCHER
+        case "robotpushing":
+            benchmark_dim = 14
+            benchmark_type = BenchmarkType.BENCHER
+        case "lasso-breastcancer":
+            benchmark_dim = 10
+            benchmark_type = BenchmarkType.BENCHER
+        case "rover":
+            benchmark_dim = 60
+            benchmark_type = BenchmarkType.BENCHER
+        case 'hartmann6':
+            benchmark_dim = 6
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'branin2':
+            benchmark_dim = 2
+            benchmark_type = BenchmarkType.BOTORCH
+        case s if s.startswith('prior_sample_'):
+            benchmark_dim = int(s.split('_')[2][:-1])
+            sample_ls = float(s.split('_')[-1][2:])
+            benchmark_type = BenchmarkType.GP_PRIOR_SAMPLE
+        case _:
+            raise ValueError("Invalid benchmark")
+
+    def objective(
+            x: Tensor,
+    ) -> Tensor:
+        """
+        The objective function
+
+        Args:
+            x: the input
+
+        Returns:
+            Tensor: the output
+
+        """
+        if benchmark_type == BenchmarkType.BOTORCH:
+            if args.benchmark == 'hartmann6':
+                _f = Hartmann(negate=True)
+                return _f(x)
+            elif args.benchmark == 'branin2':
+
+                branin_bounds = torch.tensor([[-5, 10], [0, 15]])
+                x_eval = x * (branin_bounds[1] - branin_bounds[0]) + branin_bounds[0]
+
+                _f = Branin(negate=True)
+                return _f(x_eval)
+
+        elif benchmark_type == BenchmarkType.BENCHER:
+            stub = BencherStub(
+                grpc.insecure_channel(f"localhost:50051")
+            )
+            assert x.ndim in [1, 2], 'x must be 1D or 2D'
+            _x = x
+            if x.ndim == 2:
+                assert x.shape[0] == 1, 'x has to be essentially 1D'
+                _x = x.squeeze(0)
+            # add timeout to evaluation
+            n_retries = 0
+            failed = True
+            while n_retries < 10:
+                try:
+                    res = stub.evaluate_point(
+                        BenchmarkRequest(
+                            benchmark=benchmark_name,
+                            point={
+                                'values': _x.tolist()
+                            }
+                        ),
+                    )
+                    failed = False
+                    break
+                except Exception as e:
+                    print(f'error: {e}')
+                    n_retries += 1
+                    if n_retries == 10 and failed:
+                        raise e
+                    time.sleep(5)
+            # negate the result since we are maximizing
+            _res = -res.value
+            # to torch.double
+            return torch.tensor(_res, dtype=torch.double)
+        elif benchmark_type == BenchmarkType.GP_PRIOR_SAMPLE:
+            prior_sample_gp_covar_module = MaternKernel(
+                nu=2.5,
+                ard_num_dims=benchmark_dim,
+            )
+            prior_sample_gp_covar_module.lengthscale = torch.tensor(sample_ls)
+            prior_sample_gp = SingleTaskGP(
+                torch.empty(0, benchmark_dim, dtype=torch.double),
+                torch.empty(0, 1, dtype=torch.double),
+                covar_module=prior_sample_gp_covar_module,
+            )
+
+            with torch_random_seed(42):
+                prior_sample_gp_path = draw_matheron_paths(
+                    model=deepcopy(prior_sample_gp),
+                    sample_shape=torch.Size([1]),
+                )
+            return prior_sample_gp_path(x.detach().reshape(1, -1)).detach().squeeze()
+        else:
+            raise ValueError("Invalid benchmark type")
+
+    return objective, benchmark_dim
+
+
 def get_gp(
         train_x: Tensor,
         train_y: Tensor,
+        gp_lengthscale: Optional[float] = None,
+        gp_noise: Optional[float] = None,
+        gp_outputscale: Optional[float] = None
 ) -> SingleTaskGP:
     """
     Get a GP model with a Matern kernel and Gamma prior on the lengthscale.
@@ -45,6 +212,9 @@ def get_gp(
     Args:
         train_x: the training x data
         train_y: the training y data
+        gp_lengthscale: the lengthscale of the GP
+        gp_noise: the noise of the GP
+        gp_outputscale: the outputscale
 
     Returns:
         SingleTaskGP: the GP model
@@ -52,8 +222,17 @@ def get_gp(
     """
     outcome_transform = Standardize(m=1)
     covar_module = ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=GammaPrior(1.5, 0.1)))
+    if gp_lengthscale is not None:
+        covar_module.base_kernel.lengthscale = gp_lengthscale
+        covar_module.base_kernel.raw_lengthscale.requires_grad = False
+    if gp_outputscale is not None:
+        covar_module.outputscale = gp_outputscale
+        covar_module.raw_outputscale.requires_grad = False
     likelihood = get_gaussian_likelihood_with_gamma_prior()
-    likelihood.noise = 1e-4
+    if gp_noise is not None:
+        likelihood.noise = gp_noise
+    else:
+        likelihood.noise = 1e-4
     likelihood.raw_noise.requires_grad = False
 
     gp = SingleTaskGP(
@@ -316,7 +495,6 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 print(f"Iteration {i}: K: {kval.item():.3e}; beta {betaval.item():.3e}; AF value: {acq_value:.3e}")
         return cur_X, acq_value, kval.item(), betaval.item()
 
-
     def generate_max_value_term(
             self,
             X: Tensor
@@ -335,7 +513,6 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         max_value_term = (self.optimal_outputs.squeeze(1) - improvement_term).clamp_min(self.clamp_min)
         # This should be able to be logged, since it is per-sample
         return max_value_term
-
 
     def find_k(
             self,
@@ -356,7 +533,6 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         beta_vals = k_vals / A
         return k_vals, beta_vals
 
-
     def root_finding(
             self,
             x: Tensor
@@ -368,7 +544,8 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         for i, intercept in enumerate(x.flatten().detach().numpy()):
             res[i] = find_root_log_minus_digamma(intercept, initial_guess=0.5)
         return torch.Tensor(res).reshape(x.shape)
-    
+
+
 class VariationalEntropySearchExponential(MCAcquisitionFunction):
 
     def __init__(
@@ -446,7 +623,6 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
 
         return cur_X, acq_value, kval.item(), betaval.item()
 
-
     def generate_max_value_term(
             self,
             X: Tensor
@@ -481,6 +657,9 @@ if __name__ == "__main__":
     argparse.add_argument("--sample_around_best", type=str2bool, default=True)
     argparse.add_argument("--run_ei", type=str2bool, default=False)
     argparse.add_argument("--exponential_family", type=str2bool, default=False)
+    argparse.add_argument("--set_lengthscale", type=float, default=None)
+    argparse.add_argument("--set_noise", type=float, default=None)
+    argparse.add_argument("--set_outputscale", type=float, default=None)
 
     argparse.add_argument(
         "--benchmark", type=str, choices=[
@@ -493,12 +672,21 @@ if __name__ == "__main__":
             "lasso-breastcancer",
             "rover",
             "hartmann6",
-            "branin2"
+            "branin2",
+            "prior_sample_10d_ls0.5",
+            "prior_sample_10d_ls1",
+            "prior_sample_10d_ls2",
+            "prior_sample_2d_ls0.5",
+            "prior_sample_2d_ls1",
+            "prior_sample_2d_ls2",
         ],
         required=True
     )
 
     args = argparse.parse_args()
+
+    # Define the objective function
+    objective, D = get_objective(benchmark_name=args.benchmark)
 
     args_dir = vars(args)
     # calculate run_dir hash with adler32
@@ -511,13 +699,17 @@ if __name__ == "__main__":
     os.makedirs(f"runs/{run_dir}", exist_ok=True)
 
     # save args.json to run_dir
-    with open(f"runs/{run_dir}/args.json", "w") as f:
-        json.dump(args_dir, f)
+    with open(f"runs/{run_dir}/args.json", "w") as file:
+        json.dump(args_dir, file)
 
     num_paths = args.num_paths
     benchmark_name = args.benchmark
     clamp_min = args.clamp_min
     run_ei = args.run_ei
+    gp_lengthscale = args.set_lengthscale
+    gp_noise = args.set_noise
+    gp_outputscale = args.set_outputscale
+
     if args.exponential_family:
         ves_class = VariationalEntropySearchExponential
     else:
@@ -528,101 +720,14 @@ if __name__ == "__main__":
         "options"     : {"sample_around_best": args.sample_around_best}
     }
 
-    match args.benchmark:
-        case "lasso-dna":
-            D = 180
-            TYPE = 'bencher'
-        case "mopta08":
-            D = 124
-            TYPE = 'bencher'
-        case "svm":
-            D = 388
-            TYPE = 'bencher'
-        case "mujoco-ant":
-            D = 888
-            TYPE = 'bencher'
-        case "mujoco-humanoid":
-            D = 6392
-            TYPE = 'bencher'
-        case "robotpushing":
-            D = 14
-            TYPE = 'bencher'
-        case "lasso-breastcancer":
-            D = 10
-            TYPE = 'bencher'
-        case "rover":
-            D = 60
-            TYPE = 'bencher'
-        case 'hartmann6':
-            D = 6
-            TYPE = 'botorch'
-        case 'branin2':
-            D = 2
-            TYPE = 'botorch'
-        case _:
-            raise ValueError("Invalid benchmark")
-
     n_init = args.n_init
     train_x_ves = torch.rand(n_init, D, dtype=torch.double)
-    
+
     if run_ei:
         train_x_ei = train_x_ves.clone()
-#        del train_x_ves
+    #        del train_x_ves
 
-
-    def f(
-            x: Tensor,
-    ):
-        if TYPE == 'botorch':
-            if args.benchmark == 'hartmann6':
-                _f = Hartmann(negate=True)
-                return _f(x)
-            elif args.benchmark == 'branin2':
-
-                branin_bounds = torch.tensor([[-5, 10], [0, 15]])
-                x_eval = x * (branin_bounds[1] - branin_bounds[0]) + branin_bounds[0]
-
-                _f = Branin(negate=True)
-                return _f(x_eval)
-
-        elif TYPE == 'bencher':
-            stub = BencherStub(
-                grpc.insecure_channel(f"localhost:50051")
-            )
-            assert x.ndim in [1, 2], 'x must be 1D or 2D'
-            _x = x
-            if x.ndim == 2:
-                assert x.shape[0] == 1, 'x has to be essentially 1D'
-                _x = x.squeeze(0)
-            # add timeout to evaluation
-            n_retries = 0
-            failed = True
-            while n_retries < 10:
-                try:
-                    res = stub.evaluate_point(
-                        BenchmarkRequest(
-                            benchmark=benchmark_name,
-                            point={
-                                'values': _x.tolist()
-                            }
-                        ),
-                    )
-                    failed = False
-                    break
-                except Exception as e:
-                    print(f'error: {e}')
-                    n_retries += 1
-                    if n_retries == 10 and failed:
-                        raise e
-                    time.sleep(5)
-            # negate the result since we are maximizing
-            _res = -res.value
-            # to torch.double
-            return torch.tensor(_res, dtype=torch.double)
-        else:
-            raise ValueError("Invalid benchmark type")
-
-    train_y_ves = torch.Tensor([f(x) for x in train_x_ves]).unsqueeze(1).to(torch.double)
+    train_y_ves = torch.Tensor([objective(x) for x in train_x_ves]).unsqueeze(1).to(torch.double)
     if run_ei:
         train_y_ei = train_y_ves.clone()
         del train_y_ves
@@ -630,13 +735,21 @@ if __name__ == "__main__":
     bounds = torch.zeros(D, 2)
     bounds[:, 1] = 1
 
+    # partial function to get the GP that already has the lengthscale, noise, and outputscale set
+    _get_gp = partial(
+        get_gp,
+        gp_lengthscale=gp_lengthscale,
+        gp_noise=gp_noise,
+        gp_outputscale=gp_outputscale
+    )
+
     if run_ei:
-        gp_ei = get_gp(train_x_ei, train_y_ei)
+        gp_ei = _get_gp(train_x_ei, train_y_ei)
         mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
         fit_gpytorch_mll(mll_ei)  # fit mll hyperparameters
         ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
     else:
-        gp_ves = get_gp(train_x_ves, train_y_ves)
+        gp_ves = _get_gp(train_x_ves, train_y_ves)
         mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
         fit_gpytorch_mll(mll_ves)  # fit mll hyperparameters
         paths = draw_matheron_paths(gp_ves, torch.Size([num_paths]))
@@ -664,7 +777,7 @@ if __name__ == "__main__":
                 raw_samples=args.acqf_raw_samples,
             )
             train_x_ei = torch.cat([train_x_ei, ei_candidate], dim=0)
-            f_ei = f(ei_candidate)
+            f_ei = objective(ei_candidate)
             print(
                 f"EI: cand={ei_candidate}, acq_val={acq_value:.3e}, f_val={f_ei.item():.3e}, f_max={train_y_ei.max()}"
             )
@@ -673,7 +786,7 @@ if __name__ == "__main__":
             np.save(f"runs/{run_dir}/train_x_ei.npy", train_x_ei.detach().numpy())
             np.save(f"runs/{run_dir}/train_y_ei.npy", train_y_ei.detach().numpy())
 
-            gp_ei = get_gp(train_x_ei, train_y_ei)
+            gp_ei = _get_gp(train_x_ei, train_y_ei)
             mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
             fit_gpytorch_mll(mll_ei)  # fit mll hyperpara
             ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
@@ -682,7 +795,7 @@ if __name__ == "__main__":
             k_vals.append(k_val)
             beta_vals.append(beta_val)
             train_x_ves = torch.cat([train_x_ves, ves_candidate], dim=0)
-            f_ves = f(ves_candidate)
+            f_ves = objective(ves_candidate)
             print(f"VES: cand={ves_candidate}, acq_val={v:.3e}, f_val={f_ves.item():.3e}, f_max={train_y_ves.max()}")
             train_y_ves = torch.cat([train_y_ves, f_ves.reshape(1, 1)], dim=0)
             # save the results
@@ -693,7 +806,7 @@ if __name__ == "__main__":
             np.save(f"runs/{run_dir}/k_vals.npy", np.array(k_vals))
             np.save(f"runs/{run_dir}/beta_vals.npy", np.array(beta_vals))
 
-            gp_ves = get_gp(train_x_ves, train_y_ves)
+            gp_ves = _get_gp(train_x_ves, train_y_ves)
 
             mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
             fit_gpytorch_mll(mll_ves)  # fit mll hyperpara
