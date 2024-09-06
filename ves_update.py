@@ -339,9 +339,7 @@ def find_root_log_minus_digamma(
 
     root_finding_result = optimize.root_scalar(
         f,
-        bracket=[lower_bound, upper_bound],
         x0=initial_guess,
-        method='brentq',
         rtol=tol
     )
     if root_finding_result.converged:
