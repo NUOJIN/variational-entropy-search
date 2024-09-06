@@ -315,8 +315,8 @@ def find_root_log_minus_digamma(
         intercept,
         initial_guess,
         tol=1e-5,
-        lower_bound=torch.tensor(1e-8),
-        upper_bound=torch.tensor(1e8)
+        lower_bound=1e-8,
+        upper_bound=1e8
 ):
     """
     Find a root of the function log(x) - digamma(x) - intercept using a combination of
@@ -337,15 +337,26 @@ def find_root_log_minus_digamma(
     ):
         return math.log(x) - scipy.special.digamma(x) - intercept
 
-    root_finding_result = optimize.root_scalar(
-        f,
-        x0=initial_guess,
-        rtol=tol
-    )
-    if root_finding_result.converged:
-        return root_finding_result.root
-    else:
-        return 1.0
+    def f_least_square(
+            x
+    ):
+        return f(x) ** 2
+
+    try:
+        root_finding_result = optimize.minimize_scalar(
+            f_least_square,
+            bounds=(lower_bound, upper_bound),
+            options={'xatol': tol}
+        ).x
+    except:
+        root_finding_result = 1.0
+
+    # root_finding_result = optimize.root_scalar(
+    #    f,
+    #    x0=initial_guess,
+    #    rtol=tol
+    # )
+    return root_finding_result
 
 
 class HalfVESGamma(MCAcquisitionFunction):
@@ -674,6 +685,9 @@ if __name__ == "__main__":
             "prior_sample_10d_ls0.5",
             "prior_sample_10d_ls1",
             "prior_sample_10d_ls2",
+            "prior_sample_50d_ls0.5",
+            "prior_sample_50d_ls1",
+            "prior_sample_50d_ls2",
             "prior_sample_2d_ls0.5",
             "prior_sample_2d_ls1",
             "prior_sample_2d_ls2",
