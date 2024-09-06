@@ -19,6 +19,7 @@ import torch
 from bencherscaffold.bencher_pb2 import BenchmarkRequest
 from bencherscaffold.bencher_pb2_grpc import BencherStub
 from botorch.acquisition import LogExpectedImprovement
+from botorch.acquisition.max_value_entropy_search import qMaxValueEntropy
 # from tqdm import tqdm
 from botorch.acquisition.monte_carlo import MCAcquisitionFunction
 from botorch.fit import fit_gpytorch_mll
@@ -665,6 +666,7 @@ if __name__ == "__main__":
     argparse.add_argument("--acqf_num_restarts", type=int, default=5)
     argparse.add_argument("--sample_around_best", type=str2bool, default=True)
     argparse.add_argument("--run_ei", type=str2bool, default=False)
+    argparse.add_argument("--run_mes", type=str2bool, default=False)
     argparse.add_argument("--exponential_family", type=str2bool, default=False)
     argparse.add_argument("--set_lengthscale", type=float, default=None)
     argparse.add_argument("--set_noise", type=float, default=None)
@@ -697,6 +699,10 @@ if __name__ == "__main__":
 
     args = argparse.parse_args()
 
+    # When both run_ei and run_mes are True, run_ei will be executed
+    if args.run_ei and args.run_mes:
+        args.run_mes = False
+
     # Define the objective function
     objective, D = get_objective(benchmark_name=args.benchmark)
 
@@ -718,6 +724,7 @@ if __name__ == "__main__":
     benchmark_name = args.benchmark
     clamp_min = args.clamp_min
     run_ei = args.run_ei
+    run_mes = args.run_mes
     gp_lengthscale = args.set_lengthscale
     gp_noise = args.set_noise
     gp_outputscale = args.set_outputscale
@@ -734,15 +741,14 @@ if __name__ == "__main__":
 
     n_init = args.n_init
     train_x_ves = torch.rand(n_init, D, dtype=torch.double)
+    train_y_ves = torch.Tensor([objective(x) for x in train_x_ves]).unsqueeze(1).to(torch.double)
 
     if run_ei:
         train_x_ei = train_x_ves.clone()
-    #        del train_x_ves
-
-    train_y_ves = torch.Tensor([objective(x) for x in train_x_ves]).unsqueeze(1).to(torch.double)
-    if run_ei:
         train_y_ei = train_y_ves.clone()
-        del train_y_ves
+    if run_mes:
+        train_x_mes = train_x_ves.clone()
+        train_y_mes = train_y_ves.clone()
 
     bounds = torch.zeros(D, 2)
     bounds[:, 1] = 1
@@ -760,6 +766,12 @@ if __name__ == "__main__":
         mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
         fit_gpytorch_mll(mll_ei)  # fit mll hyperparameters
         ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
+    elif run_mes:
+        gp_mes = _get_gp(train_x_mes, train_y_mes)
+        mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes) # mll object
+        fit_gpytorch_mll(mll_mes) # fit mll hyperparameters
+        candidate_set = SobolEngine(dimension=bounds.shape[0], scramble=True).draw(2048)
+        mes_model = qMaxValueEntropy(gp_mes, candidate_set)
     else:
         gp_ves = _get_gp(train_x_ves, train_y_ves)
         mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
@@ -802,6 +814,28 @@ if __name__ == "__main__":
             mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
             fit_gpytorch_mll(mll_ei)  # fit mll hyperpara
             ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
+        elif run_mes:
+            mes_candidate, acq_value = optimize_acqf(
+                mes_model,
+                bounds=bounds.T,
+                q=1,  # Number of candidates to optimize for
+                num_restarts=args.acqf_num_restarts,
+                raw_samples=args.acqf_raw_samples,
+            )
+            train_x_mes = torch.cat([train_x_mes, mes_candidate], dim=0)
+            f_mes = objective(mes_candidate)
+            print(
+                f"MES: cand={mes_candidate}, acq_val={acq_value:.3e}, f_val={f_mes.item():.3e}, f_max={train_y_mes.max()}"
+            )
+            train_y_mes = torch.cat([train_y_mes, f_mes.reshape(1, 1)], dim=0)
+            # save the results
+            np.save(f"runs/{run_dir}/train_x_mes.npy", train_x_mes.detach().numpy())
+            np.save(f"runs/{run_dir}/train_y_mes.npy", train_y_mes.detach().numpy())
+
+            gp_mes = _get_gp(train_x_mes, train_y_mes)
+            mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)
+            fit_gpytorch_mll(mll_mes)
+            mes_model = qMaxValueEntropy(gp_mes, candidate_set)
         else:
             ves_candidate, v, k_val, beta_val = ves_model(X, num_iter=args.num_iter)
             k_vals.append(k_val)
