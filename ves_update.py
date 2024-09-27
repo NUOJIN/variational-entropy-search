@@ -490,12 +490,15 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 self.clamp_min
             )
             # Step 2: Given k and beta, find optimal X
-            cur_X, acq_value = optimize_acqf(
+            new_X, acq_value = optimize_acqf(
                 halfVES,
                 bounds=self.bounds.T,
                 q=1,  # Number of candidates to optimize for
                 **self.optimize_acqf_options
             )
+            if torch.norm(new_X - cur_X) < 1e-5:
+                break
+            cur_X = new_X
             self.paths = draw_matheron_paths(self.model, torch.Size([num_paths]))
             self.optimal_outputs = optimize_posterior_samples(
                 self.paths,
