@@ -20,18 +20,16 @@ from bencherscaffold.bencher_pb2 import BenchmarkRequest
 from bencherscaffold.bencher_pb2_grpc import BencherStub
 from botorch.acquisition import LogExpectedImprovement
 from botorch.acquisition.max_value_entropy_search import qMaxValueEntropy
-# from tqdm import tqdm
 from botorch.acquisition.monte_carlo import MCAcquisitionFunction
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
-# from botorch.utils.sampling import optimize_posterior_samples
 from botorch.models.model import Model
 from botorch.models.transforms.outcome import Standardize
 from botorch.models.utils.gpytorch_modules import get_gaussian_likelihood_with_gamma_prior
 from botorch.optim import optimize_acqf
 from botorch.sampling import SobolEngine
 from botorch.sampling.pathwise import draw_matheron_paths
-from botorch.test_functions import Hartmann, Branin
+from botorch.test_functions import Hartmann, Branin, Levy, Griewank
 from gpytorch.kernels import ScaleKernel, MaternKernel
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.priors import GammaPrior
@@ -83,6 +81,12 @@ def get_objective(
         case "lasso-dna":
             benchmark_dim = 180
             benchmark_type = BenchmarkType.BENCHER
+        case "lasso-high":
+            benchmark_dim = 300
+            benchmark_type = BenchmarkType.BENCHER
+        case "lasso-hard":
+            benchmark_dim = 1000
+            benchmark_type = BenchmarkType.BENCHER
         case "mopta08":
             benchmark_dim = 124
             benchmark_type = BenchmarkType.BENCHER
@@ -94,6 +98,12 @@ def get_objective(
             benchmark_type = BenchmarkType.BENCHER
         case "mujoco-humanoid":
             benchmark_dim = 6392
+            benchmark_type = BenchmarkType.BENCHER
+        case "mujoco-halfcheetah":
+            benchmark_dim = 102
+            benchmark_type = BenchmarkType.BENCHER
+        case "mujoco-walker":
+            benchmark_dim = 102
             benchmark_type = BenchmarkType.BENCHER
         case "robotpushing":
             benchmark_dim = 14
@@ -109,6 +119,33 @@ def get_objective(
             benchmark_type = BenchmarkType.BOTORCH
         case 'branin2':
             benchmark_dim = 2
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'levy100':
+            benchmark_dim = 100
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'levy300':
+            benchmark_dim = 300
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'levy500':
+            benchmark_dim = 500
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'griewank100':
+            benchmark_dim = 100
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'griewank300':
+            benchmark_dim = 300
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'griewank500':
+            benchmark_dim = 500
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'schwefel100':
+            benchmark_dim = 100
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'schwefel300':
+            benchmark_dim = 300
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'schwefel500':
+            benchmark_dim = 500
             benchmark_type = BenchmarkType.BOTORCH
         case s if s.startswith('prior_sample_'):
             benchmark_dim = int(s.split('_')[2][:-1])
@@ -134,9 +171,41 @@ def get_objective(
             if args.benchmark == 'hartmann6':
                 _f = Hartmann(negate=True)
                 return _f(x)
+            elif args.benchmark.startswith('levy'):
+                # name is something like levy300
+                dim = int(args.benchmark[4:])
+                levy_bounds = torch.tensor([[-10, 10]] * dim).T
+                x_eval = x * (levy_bounds[1] - levy_bounds[0]) + levy_bounds[0]
+
+                _f = Levy(negate=True, dim=dim)
+                return _f(x_eval)
+            elif args.benchmark.startswith('griewank'):
+                # name is something like griewank300
+                dim = int(args.benchmark[8:])
+                griewank_bounds = torch.tensor([[-600, 600]] * dim).T
+                x_eval = x * (griewank_bounds[1] - griewank_bounds[0]) + griewank_bounds[0]
+
+                _f = Griewank(negate=True, dim=dim)
+                return _f(x_eval)
+            elif args.benchmark.startswith('schwefel'):
+                # name is something like schwefel300
+                dim = int(args.benchmark[8:])
+                schwefel_bounds = torch.tensor([[-500, 500]] * dim).T
+                x_eval = x * (schwefel_bounds[1] - schwefel_bounds[0]) + schwefel_bounds[0]
+
+                def schwefel(
+                        x: Tensor,
+                        dim: int,
+                        negate: bool
+                ) -> Tensor:
+                    res = 418.9829 * dim - torch.sum(x * torch.sin(torch.sqrt(torch.abs(x))))
+                    return -res if negate else res
+
+                return schwefel(x_eval, dim, True)
+
             elif args.benchmark == 'branin2':
 
-                branin_bounds = torch.tensor([[-5, 10], [0, 15]])
+                branin_bounds = torch.tensor([[-5, 10], [0, 15]]).T
                 x_eval = x * (branin_bounds[1] - branin_bounds[0]) + branin_bounds[0]
 
                 _f = Branin(negate=True)
@@ -231,10 +300,11 @@ def get_gp(
         covar_module.raw_outputscale.requires_grad = False
     likelihood = get_gaussian_likelihood_with_gamma_prior()
     if gp_noise is not None:
+        # TODO weird hack, we need to set gp_noise to allow for noise optimization
         likelihood.noise = gp_noise
     else:
         likelihood.noise = 1e-4
-    likelihood.raw_noise.requires_grad = False
+        likelihood.raw_noise.requires_grad = False
 
     gp = SingleTaskGP(
         train_x,
@@ -260,12 +330,9 @@ def str2bool(
 def optimize_posterior_samples(
         paths,
         bounds: Tensor,
-        maximize: Optional[bool] = True,
-        candidates: Optional[Tensor] = None,
         raw_samples: Optional[int] = 2048,
         num_restarts: Optional[int] = 10,
         maxiter: int = 100,
-        spray_points: int = 20,
         lr: float = 2.5e-4
 ) -> Tuple[Tensor, Tensor]:
     r"""Cheaply optimizes posterior samples by random querying followed by vanilla
@@ -275,9 +342,6 @@ def optimize_posterior_samples(
         paths: Tample paths from the GP which can be called via forward()
         x: evaluation position for y_x
         bounds: The bounds on the search space.
-        maximize: Whether or not to maximize or minimize the posterior samples.
-        candidates: A priori good candidates (typically previous design points)
-            which acts as extra initial guesses for the optimization routine.
         raw_samples: The number of samples with which to query the samples initially.
         num_restarts The number of gradient descent steps to use on each of the best 
         found initial points.
@@ -314,7 +378,6 @@ def optimize_posterior_samples(
 
 def find_root_log_minus_digamma(
         intercept,
-        initial_guess,
         tol=1e-5,
         lower_bound=1e-8,
         upper_bound=1e8
@@ -325,7 +388,6 @@ def find_root_log_minus_digamma(
 
     Args:
     intercept (float or tensor): The constant value to subtract in the function.
-    initial_guess (float or tensor): Initial guess for the root.
     tol (float): Tolerance for convergence.
     max_iter (int): Maximum number of iterations.
 
@@ -352,11 +414,6 @@ def find_root_log_minus_digamma(
     except:
         root_finding_result = 1.0
 
-    # root_finding_result = optimize.root_scalar(
-    #    f,
-    #    x0=initial_guess,
-    #    rtol=tol
-    # )
     return root_finding_result
 
 
@@ -555,7 +612,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         """
         res = np.zeros_like(x.flatten().detach().numpy())
         for i, intercept in enumerate(x.flatten().detach().numpy()):
-            res[i] = find_root_log_minus_digamma(intercept, initial_guess=0.5)
+            res[i] = find_root_log_minus_digamma(intercept)
         return torch.Tensor(res).reshape(x.shape)
 
 
@@ -678,6 +735,8 @@ if __name__ == "__main__":
     argparse.add_argument(
         "--benchmark", type=str, choices=[
             "lasso-dna",
+            "lasso-high",
+            "lasso-hard",
             "mopta08",
             "svm",
             "mujoco-ant",
@@ -693,9 +752,25 @@ if __name__ == "__main__":
             "prior_sample_50d_ls0.5",
             "prior_sample_50d_ls1",
             "prior_sample_50d_ls2",
+            "prior_sample_100d_ls0.5",
+            "prior_sample_100d_ls1",
+            "prior_sample_100d_ls2",
             "prior_sample_2d_ls0.5",
             "prior_sample_2d_ls1",
             "prior_sample_2d_ls2",
+            "prior_sample_2d_ls0.1",
+            "prior_sample_2d_ls0.05",
+            "mujoco-halfcheetah",
+            "mujoco-walker",
+            "schwefel100",
+            "schwefel300",
+            "schwefel500",
+            "levy100",
+            "levy300",
+            "levy500",
+            "griewank100",
+            "griewank300",
+            "griewank500",
         ],
         required=True
     )
@@ -771,8 +846,8 @@ if __name__ == "__main__":
         ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
     elif run_mes:
         gp_mes = _get_gp(train_x_mes, train_y_mes)
-        mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes) # mll object
-        fit_gpytorch_mll(mll_mes) # fit mll hyperparameters
+        mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)  # mll object
+        fit_gpytorch_mll(mll_mes)  # fit mll hyperparameters
         candidate_set = SobolEngine(dimension=bounds.shape[0], scramble=True).draw(2048)
         mes_model = qMaxValueEntropy(gp_mes, candidate_set)
     else:
@@ -791,8 +866,8 @@ if __name__ == "__main__":
         k_vals = []
         beta_vals = []
 
-    for i in range(args.num_bo_iter):
-        print(f"+++ Iteration {i} +++")
+    for bo_iter in range(args.num_bo_iter):
+        print(f"+++ Iteration {bo_iter} +++")
         # Define an intial point for VES-Gamma
         X = torch.rand(1, 1, D)
         if run_ei:
@@ -812,6 +887,11 @@ if __name__ == "__main__":
             # save the results
             np.save(f"runs/{run_dir}/train_x_ei.npy", train_x_ei.detach().numpy())
             np.save(f"runs/{run_dir}/train_y_ei.npy", train_y_ei.detach().numpy())
+
+            # get gp hyperparameters as dictionary
+            gp_dict = gp_ei.state_dict()
+            # save gp hyperparameters to json
+            torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ei_iter{bo_iter}.pth")
 
             gp_ei = _get_gp(train_x_ei, train_y_ei)
             mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
@@ -835,6 +915,11 @@ if __name__ == "__main__":
             np.save(f"runs/{run_dir}/train_x_mes.npy", train_x_mes.detach().numpy())
             np.save(f"runs/{run_dir}/train_y_mes.npy", train_y_mes.detach().numpy())
 
+            # get gp hyperparameters as dictionary
+            gp_dict = gp_mes.state_dict()
+            # save gp hyperparameters to json
+            torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_mes_iter{bo_iter}.pth")
+
             gp_mes = _get_gp(train_x_mes, train_y_mes)
             mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)
             fit_gpytorch_mll(mll_mes)
@@ -854,6 +939,11 @@ if __name__ == "__main__":
             # save k_vals and beta_vals
             np.save(f"runs/{run_dir}/k_vals.npy", np.array(k_vals))
             np.save(f"runs/{run_dir}/beta_vals.npy", np.array(beta_vals))
+
+            # get gp hyperparameters as dictionary
+            gp_dict = gp_ves.state_dict()
+            # save gp hyperparameters to json
+            torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ves_iter{bo_iter}.pth")
 
             gp_ves = _get_gp(train_x_ves, train_y_ves)
 
