@@ -32,7 +32,8 @@ from botorch.sampling.pathwise import draw_matheron_paths
 from botorch.test_functions import Hartmann, Branin, Levy, Griewank
 from gpytorch.kernels import ScaleKernel, MaternKernel
 from gpytorch.mlls import ExactMarginalLogLikelihood
-from gpytorch.priors import GammaPrior
+from gpytorch.priors import GammaPrior, LogNormalPrior
+from mpmath import levin
 from scipy import optimize
 from torch import Tensor
 
@@ -274,7 +275,8 @@ def get_gp(
         train_y: Tensor,
         gp_lengthscale: Optional[float] = None,
         gp_noise: Optional[float] = None,
-        gp_outputscale: Optional[float] = None
+        gp_outputscale: Optional[float] = None,
+        lengthscale_prior: Optional[str] = None
 ) -> SingleTaskGP:
     """
     Get a GP model with a Matern kernel and Gamma prior on the lengthscale.
@@ -285,13 +287,21 @@ def get_gp(
         gp_lengthscale: the lengthscale of the GP
         gp_noise: the noise of the GP
         gp_outputscale: the outputscale
+        lengthscale_prior: the prior on the lengthscale, choices are "bounce" and "vbo"
 
     Returns:
         SingleTaskGP: the GP model
 
     """
+    assert lengthscale_prior in [None, "bounce", "vbo"], "Invalid lengthscale prior"
     outcome_transform = Standardize(m=1)
-    covar_module = ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=GammaPrior(1.5, 0.1)))
+
+    if lengthscale_prior == "bounce" or lengthscale_prior is None:
+        _lengthscale_prior = GammaPrior(3.0, 6.0)
+    elif lengthscale_prior == "vbo":
+        _lengthscale_prior = LogNormalPrior(math.sqrt(2) + math.log(D) / 2, math.sqrt(3))
+
+    covar_module = ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=_lengthscale_prior))
     if gp_lengthscale is not None:
         covar_module.base_kernel.lengthscale = gp_lengthscale
         covar_module.base_kernel.raw_lengthscale.requires_grad = False
@@ -415,6 +425,35 @@ def find_root_log_minus_digamma(
         root_finding_result = 1.0
 
     return root_finding_result
+
+
+def fit_mll_with_adam_backup(
+        mll: ExactMarginalLogLikelihood,
+) -> None:
+    """
+    Fit the likelihood using BoTorch's fit_mll but use Adam if the original optimization fails.
+
+    Args:
+        mll: The marginal log likelihood object.
+
+    Returns:
+        None
+
+    """
+    try:
+        fit_gpytorch_mll(mll)
+    except Exception as e:
+        print(f'Error: {e}')
+        print('Falling back to Adam optimizer')
+        optimizer = torch.optim.Adam(mll.parameters(), lr=0.1)
+        mll.train()
+        for i in range(100):
+            optimizer.zero_grad()
+            output = mll.model(*mll.train_inputs)
+            loss = -mll.mll(output, mll.target)
+            loss.backward()
+            optimizer.step()
+        mll.eval()
 
 
 class HalfVESGamma(MCAcquisitionFunction):
@@ -731,6 +770,7 @@ if __name__ == "__main__":
     argparse.add_argument("--set_lengthscale", type=float, default=None)
     argparse.add_argument("--set_noise", type=float, default=None)
     argparse.add_argument("--set_outputscale", type=float, default=None)
+    argparse.add_argument("--lengthscale_prior", choices=["bounce", "vbo"], default="bounce")
 
     argparse.add_argument(
         "--benchmark", type=str, choices=[
@@ -806,6 +846,7 @@ if __name__ == "__main__":
     gp_lengthscale = args.set_lengthscale
     gp_noise = args.set_noise
     gp_outputscale = args.set_outputscale
+    lengthscale_prior = args.lengthscale_prior
 
     if args.exponential_family:
         ves_class = VariationalEntropySearchExponential
@@ -836,24 +877,25 @@ if __name__ == "__main__":
         get_gp,
         gp_lengthscale=gp_lengthscale,
         gp_noise=gp_noise,
-        gp_outputscale=gp_outputscale
+        gp_outputscale=gp_outputscale,
+        lengthscale_prior=lengthscale_prior,
     )
 
     if run_ei:
         gp_ei = _get_gp(train_x_ei, train_y_ei)
         mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
-        fit_gpytorch_mll(mll_ei)  # fit mll hyperparameters
+        fit_mll_with_adam_backup(mll_ei)  # fit mll hyperparameters
         ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
     elif run_mes:
         gp_mes = _get_gp(train_x_mes, train_y_mes)
         mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)  # mll object
-        fit_gpytorch_mll(mll_mes)  # fit mll hyperparameters
+        fit_mll_with_adam_backup(mll_mes)  # fit mll hyperparameters
         candidate_set = SobolEngine(dimension=bounds.shape[0], scramble=True).draw(2048)
         mes_model = qMaxValueEntropy(gp_mes, candidate_set)
     else:
         gp_ves = _get_gp(train_x_ves, train_y_ves)
         mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
-        fit_gpytorch_mll(mll_ves)  # fit mll hyperparameters
+        fit_mll_with_adam_backup(mll_ves)  # fit mll hyperparameters
         paths = draw_matheron_paths(gp_ves, torch.Size([num_paths]))
         ves_model = ves_class(
             gp_ves,
@@ -895,7 +937,7 @@ if __name__ == "__main__":
 
             gp_ei = _get_gp(train_x_ei, train_y_ei)
             mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
-            fit_gpytorch_mll(mll_ei)  # fit mll hyperpara
+            fit_mll_with_adam_backup(mll_ei)  # fit mll hyperpara
             ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
         elif run_mes:
             mes_candidate, acq_value = optimize_acqf(
@@ -922,7 +964,7 @@ if __name__ == "__main__":
 
             gp_mes = _get_gp(train_x_mes, train_y_mes)
             mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)
-            fit_gpytorch_mll(mll_mes)
+            fit_mll_with_adam_backup(mll_mes)
             mes_model = qMaxValueEntropy(gp_mes, candidate_set)
         else:
             ves_candidate, v, k_val, beta_val = ves_model(X, num_iter=args.num_iter)
@@ -948,7 +990,7 @@ if __name__ == "__main__":
             gp_ves = _get_gp(train_x_ves, train_y_ves)
 
             mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
-            fit_gpytorch_mll(mll_ves)  # fit mll hyperpara
+            fit_mll_with_adam_backup(mll_ves)  # fit mll hyperpara
 
             paths = draw_matheron_paths(gp_ves, torch.Size([num_paths]))
             ves_model = ves_class(
