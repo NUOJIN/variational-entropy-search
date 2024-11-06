@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import json
 import math
 import os
+import tarfile
 import time
 from argparse import ArgumentParser
 from contextlib import contextmanager
@@ -28,12 +30,11 @@ from botorch.models.transforms.outcome import Standardize
 from botorch.models.utils.gpytorch_modules import get_gaussian_likelihood_with_gamma_prior
 from botorch.optim import optimize_acqf
 from botorch.sampling import SobolEngine
-from botorch.sampling.pathwise import draw_matheron_paths
+from botorch.sampling.pathwise import draw_matheron_paths, MatheronPath
 from botorch.test_functions import Hartmann, Branin, Levy, Griewank
 from gpytorch.kernels import ScaleKernel, MaternKernel
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.priors import GammaPrior, LogNormalPrior
-from mpmath import levin
 from scipy import optimize
 from torch import Tensor
 
@@ -518,18 +519,24 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             self,
             model: Model,
             best_f: Union[float, Tensor],
-            paths,
+            paths: MatheronPath,
             clamp_min: float,
             optimize_acqf_options: dict[str, Any] | None = None,
             bounds: Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
+            stop_tolerance_coeff: float = 1e-5,
             **kwargs: Any,
     ):
         """
         The VES(-Gamma) class should be initialized with following args
-        model: Gaussian Process model
-        best_f: y_t^* the best observation
-        paths: Sampled Matheron paths
-        bounds: D x 2 boundary
+
+        Args:
+            model: Gaussian Process model
+            best_f: y_t^* the best observation
+            paths: Sampled Matheron paths
+            bounds: D x 2 boundary
+            clamp_min: minimum value for clamping
+            stop_tolerance_coeff: stopping tolerance coefficient
+            optimize_acqf_options: options for the optimizer
         """
         super().__init__(model=model)
         self.sampling_model = deepcopy(model)
@@ -541,6 +548,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         self.paths = paths
         self.bounds = bounds
         self.clamp_min = clamp_min
+        self.stop_tolerance_coeff = stop_tolerance_coeff
         if optimize_acqf_options is None:
             optimize_acqf_options = {
                 "num_restarts": 5,
@@ -592,7 +600,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 q=1,  # Number of candidates to optimize for
                 **self.optimize_acqf_options
             )
-            if torch.norm(new_X - cur_X) < 1e-5:
+            if torch.norm(new_X - cur_X) < self.stop_tolerance_coeff * self.bounds.size(0):
                 break
             cur_X = new_X
             self.paths = draw_matheron_paths(self.model, torch.Size([num_paths]))
@@ -771,6 +779,7 @@ if __name__ == "__main__":
     argparse.add_argument("--set_noise", type=float, default=None)
     argparse.add_argument("--set_outputscale", type=float, default=None)
     argparse.add_argument("--lengthscale_prior", choices=["bounce", "vbo"], default="bounce")
+    argparse.add_argument("--stop_tolerance_coeff", type=float, default=1e-5)
 
     argparse.add_argument(
         "--benchmark", type=str, choices=[
@@ -847,6 +856,7 @@ if __name__ == "__main__":
     gp_noise = args.set_noise
     gp_outputscale = args.set_outputscale
     lengthscale_prior = args.lengthscale_prior
+    stop_tolerance_coeff = args.stop_tolerance_coeff
 
     if args.exponential_family:
         ves_class = VariationalEntropySearchExponential
@@ -904,9 +914,12 @@ if __name__ == "__main__":
             paths=paths,
             clamp_min=clamp_min,
             acqf_options=acqf_options,
+            stop_tolerance_coeff=stop_tolerance_coeff
         )
         k_vals = []
         beta_vals = []
+
+    start_time = time.time()
 
     for bo_iter in range(args.num_bo_iter):
         print(f"+++ Iteration {bo_iter} +++")
@@ -960,7 +973,15 @@ if __name__ == "__main__":
             # get gp hyperparameters as dictionary
             gp_dict = gp_mes.state_dict()
             # save gp hyperparameters to json
-            torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_mes_iter{bo_iter}.pth")
+            #torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_mes_iter{bo_iter}.pth")
+            # save gp hyperparameters to tar.xz
+            with tarfile.open(f"runs/{run_dir}/hyperparameters.tar.xz", "w:xz") as tar:
+                gp_dict_file = io.BytesIO()
+                torch.save(gp_dict, gp_dict_file)
+                gp_dict_file.seek(0)
+                tarinfo = tarfile.TarInfo(f"gp_hyperparameters_mes_iter{bo_iter}.pth")
+                tarinfo.size = len(gp_dict_file.getbuffer())
+                tar.addfile(tarinfo, gp_dict_file)
 
             gp_mes = _get_gp(train_x_mes, train_y_mes)
             mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)
@@ -985,7 +1006,15 @@ if __name__ == "__main__":
             # get gp hyperparameters as dictionary
             gp_dict = gp_ves.state_dict()
             # save gp hyperparameters to json
-            torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ves_iter{bo_iter}.pth")
+            #torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ves_iter{bo_iter}.pth")
+            # save gp hyperparameters to tar.xz
+            with tarfile.open(f"runs/{run_dir}/hyperparameters.tar.xz", "w:xz") as tar:
+                gp_dict_file = io.BytesIO()
+                torch.save(gp_dict, gp_dict_file)
+                gp_dict_file.seek(0)
+                tarinfo = tarfile.TarInfo(f"gp_hyperparameters_ves_iter{bo_iter}.pth")
+                tarinfo.size = len(gp_dict_file.getbuffer())
+                tar.addfile(tarinfo, gp_dict_file)
 
             gp_ves = _get_gp(train_x_ves, train_y_ves)
 
@@ -1001,3 +1030,12 @@ if __name__ == "__main__":
                 clamp_min=clamp_min,
                 acqf_options=acqf_options,
             )
+
+            _time_passed = time.time() - start_time
+            print(f"Time passed: {_time_passed} seconds")
+    end_time = time.time()
+    seconds_passed = end_time - start_time
+    print(f"Time taken: {seconds_passed} seconds")
+    # save the time taken
+    with open(f"runs/{run_dir}/time_taken.txt", "w") as file:
+        file.write(str(seconds_passed))
