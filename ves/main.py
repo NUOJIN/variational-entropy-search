@@ -17,7 +17,7 @@ from botorch.optim import optimize_acqf
 from botorch.sampling import SobolEngine
 from gpytorch.mlls import ExactMarginalLogLikelihood
 
-from util import (
+from ves.util import (
     str2bool,
     get_gp,
     fit_mll_with_adam_backup,
