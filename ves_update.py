@@ -6,6 +6,7 @@ import math
 import os
 import tarfile
 import time
+import warnings
 from argparse import ArgumentParser
 from contextlib import contextmanager
 from copy import deepcopy
@@ -14,6 +15,7 @@ from functools import partial
 from typing import Any, Optional, Tuple, Union, Callable
 from zlib import adler32
 
+import gpytorch
 import grpc
 import numpy as np
 import scipy
@@ -35,6 +37,7 @@ from botorch.test_functions import Hartmann, Branin, Levy, Griewank
 from gpytorch.kernels import ScaleKernel, MaternKernel
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.priors import GammaPrior, LogNormalPrior
+from linear_operator.utils.errors import NotPSDError
 from scipy import optimize
 from torch import Tensor
 
@@ -345,7 +348,7 @@ def optimize_posterior_samples(
         num_restarts: Optional[int] = 10,
         maxiter: int = 100,
         lr: float = 2.5e-4,
-        device: torch.device = torch.device("cpu")
+        device: torch.device = torch.device("cpu"),
 ) -> Tuple[Tensor, Tensor]:
     r"""Cheaply optimizes posterior samples by random querying followed by vanilla
     gradient descent on the best num_restarts points.
@@ -371,7 +374,7 @@ def optimize_posterior_samples(
     candidate_queries = paths.forward(candidate_set)
     num_optima = candidate_queries.shape[0]
     batch_size = candidate_queries.shape[1] if candidate_queries.ndim == 3 else 1
-    argtop_candidates = candidate_queries.argsort(dim=-1, descending=True)[..., 0:num_restarts]
+    argtop_candidates = candidate_queries.topk(dim=-1, k=num_restarts)[1]
 
     # These are used as masks when retrieving the argmaxes
     X_argtop = candidate_set[argtop_candidates, :].requires_grad_(requires_grad=True)
@@ -442,21 +445,26 @@ def fit_mll_with_adam_backup(
         None
 
     """
-    try:
-        fit_gpytorch_mll(mll)
-    except Exception as e:
-        print(f'Error: {e}')
-        print('Falling back to Adam optimizer')
-        optimizer = torch.optim.Adam(mll.parameters(), lr=0.1)
-        mll.train()
-        model = mll.model
-        for i in range(100):
-            optimizer.zero_grad()
-            output = mll.model(*model.train_inputs)
-            loss = -mll(output, model.train_targets)
-            loss.backward()
-            optimizer.step()
-        mll.eval()
+    with gpytorch.settings.cholesky_max_tries(9):
+        try:
+            fit_gpytorch_mll(mll)
+        except Exception as e:
+            try:
+                warnings.warn(f"Error fitting MLL with L-BFGS: {e}. Running Adam-based optimization...")
+                optimizer = torch.optim.Adam(mll.parameters(), lr=0.1)
+                mll.train()
+                model = mll.model
+                for i in range(100):
+                    optimizer.zero_grad()
+                    output = mll.model(*model.train_inputs)
+                    loss = -mll(output, model.train_targets)
+                    loss.backward()
+                    optimizer.step()
+                mll.eval()
+            except NotPSDError:
+                warnings.warn("Adam optimizer failed to converge. Skipping model fitting.")
+                mll.eval()
+
 
 
 class HalfVESGamma(MCAcquisitionFunction):
@@ -611,7 +619,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             self.optimal_outputs = optimize_posterior_samples(
                 self.paths,
                 self.bounds,
-                device=device
+                device=device,
             )
             if show_progress and i % 5 == 0:
                 print(f"Iteration {i}: K: {kval.item():.3e}; beta {betaval.item():.3e}; AF value: {acq_value:.3e}")
