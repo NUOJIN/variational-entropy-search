@@ -1056,7 +1056,7 @@ if __name__ == "__main__":
             _time_passed = time.time() - start_time
             print(f"Time passed: {_time_passed} seconds")
             # save the time passed, overwrite the file if it exists
-            with open(f"runs/{run_dir}/time_passed.txt", "w") as file:
+            with open(f"runs/{run_dir}/time_taken.txt", "w") as file:
                 file.write(str(_time_passed))
     end_time = time.time()
     seconds_passed = end_time - start_time
