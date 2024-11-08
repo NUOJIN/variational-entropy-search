@@ -449,10 +449,11 @@ def fit_mll_with_adam_backup(
         print('Falling back to Adam optimizer')
         optimizer = torch.optim.Adam(mll.parameters(), lr=0.1)
         mll.train()
+        model = mll.model
         for i in range(100):
             optimizer.zero_grad()
-            output = mll.model(*mll.train_inputs)
-            loss = -mll.mll(output, mll.target)
+            output = mll.model(*model.train_inputs)
+            loss = -mll(output, model.train_targets)
             loss.backward()
             optimizer.step()
         mll.eval()
