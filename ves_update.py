@@ -254,8 +254,8 @@ def get_objective(
             )
             prior_sample_gp_covar_module.lengthscale = torch.tensor(sample_ls)
             prior_sample_gp = SingleTaskGP(
-                torch.empty(0, benchmark_dim, dtype=torch.double),
-                torch.empty(0, 1, dtype=torch.double),
+                torch.empty(0, benchmark_dim, dtype=torch.double, device=device),
+                torch.empty(0, 1, dtype=torch.double, device=device),
                 covar_module=prior_sample_gp_covar_module,
             )
 
@@ -277,7 +277,7 @@ def get_gp(
         gp_lengthscale: Optional[float] = None,
         gp_noise: Optional[float] = None,
         gp_outputscale: Optional[float] = None,
-        lengthscale_prior: Optional[str] = None
+        lengthscale_prior: Optional[str] = None,
 ) -> SingleTaskGP:
     """
     Get a GP model with a Matern kernel and Gamma prior on the lengthscale.
@@ -344,7 +344,8 @@ def optimize_posterior_samples(
         raw_samples: Optional[int] = 2048,
         num_restarts: Optional[int] = 10,
         maxiter: int = 100,
-        lr: float = 2.5e-4
+        lr: float = 2.5e-4,
+        device: torch.device = torch.device("cpu")
 ) -> Tuple[Tensor, Tensor]:
     r"""Cheaply optimizes posterior samples by random querying followed by vanilla
     gradient descent on the best num_restarts points.
@@ -364,7 +365,7 @@ def optimize_posterior_samples(
     """
     candidate_set = SobolEngine(
         dimension=bounds.shape[0], scramble=True
-    ).draw(raw_samples)
+    ).draw(raw_samples).to(device=device)
     # TODO add spray points
     # queries all samples on all candidates - output raw_samples * num_objectives * num_optima
     candidate_queries = paths.forward(candidate_set)
@@ -524,6 +525,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             optimize_acqf_options: dict[str, Any] | None = None,
             bounds: Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
             stop_tolerance_coeff: float = 1e-5,
+            device: torch.device = torch.device("cpu"),
             **kwargs: Any,
     ):
         """
@@ -543,7 +545,8 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         self.best_f = best_f
         self.optimal_outputs = optimize_posterior_samples(
             paths,
-            bounds
+            bounds,
+            device=device
         )
         self.paths = paths
         self.bounds = bounds
@@ -606,7 +609,8 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             self.paths = draw_matheron_paths(self.model, torch.Size([num_paths]))
             self.optimal_outputs = optimize_posterior_samples(
                 self.paths,
-                self.bounds
+                self.bounds,
+                device=device
             )
             if show_progress and i % 5 == 0:
                 print(f"Iteration {i}: K: {kval.item():.3e}; beta {betaval.item():.3e}; AF value: {acq_value:.3e}")
@@ -657,10 +661,12 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         """
         Root finding function to solve Eq 3.9; Non-differentiable(?)
         """
-        res = np.zeros_like(x.flatten().detach().numpy())
-        for i, intercept in enumerate(x.flatten().detach().numpy()):
+        dtype, device = x.dtype, x.device
+        x_np = x.flatten().detach().cpu().numpy()
+        res = np.zeros_like(x_np)
+        for i, intercept in enumerate(x_np):
             res[i] = find_root_log_minus_digamma(intercept)
-        return torch.Tensor(res).reshape(x.shape)
+        return torch.Tensor(res).reshape(x.shape).to(dtype=dtype, device=device)
 
 
 class VariationalEntropySearchExponential(MCAcquisitionFunction):
@@ -673,6 +679,7 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
             clamp_min: float,
             optimize_acqf_options: dict[str, Any] | None = None,
             bounds: Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
+            device: torch.device = torch.device("cpu"),
             **kwargs: Any,
     ):
         """
@@ -687,7 +694,8 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
         self.best_f = best_f
         self.optimal_outputs = optimize_posterior_samples(
             paths,
-            bounds
+            bounds,
+            device=device
         )
         self.paths = paths
         self.bounds = bounds
@@ -766,7 +774,7 @@ if __name__ == "__main__":
     argparse = ArgumentParser()
     argparse.add_argument("--num_paths", type=int, default=64, help="Number of paths to sample")
     argparse.add_argument("--num_iter", type=int, default=50, help="Number of iterations for VES")
-    argparse.add_argument("--num_bo_iter", type=int, default=500)
+    argparse.add_argument("--num_bo_iter", type=int, default=10)
     argparse.add_argument("--n_init", type=int, default=20)
     argparse.add_argument("--clamp_min", type=float, default=1e-10)
     argparse.add_argument("--acqf_raw_samples", type=int, default=512)
@@ -780,6 +788,7 @@ if __name__ == "__main__":
     argparse.add_argument("--set_outputscale", type=float, default=None)
     argparse.add_argument("--lengthscale_prior", choices=["bounce", "vbo"], default="bounce")
     argparse.add_argument("--stop_tolerance_coeff", type=float, default=1e-5)
+    argparse.add_argument("--device", type=str, default="cuda", choices=["cpu", "cuda"])
 
     argparse.add_argument(
         "--benchmark", type=str, choices=[
@@ -857,6 +866,8 @@ if __name__ == "__main__":
     gp_outputscale = args.set_outputscale
     lengthscale_prior = args.lengthscale_prior
     stop_tolerance_coeff = args.stop_tolerance_coeff
+    device = torch.device(args.device) if torch.cuda.is_available() else torch.device("cpu")
+    print(f"Device: {device}")
 
     if args.exponential_family:
         ves_class = VariationalEntropySearchExponential
@@ -869,8 +880,8 @@ if __name__ == "__main__":
     }
 
     n_init = args.n_init
-    train_x_ves = torch.rand(n_init, D, dtype=torch.double)
-    train_y_ves = torch.Tensor([objective(x) for x in train_x_ves]).unsqueeze(1).to(torch.double)
+    train_x_ves = torch.rand(n_init, D, dtype=torch.double, device=device)
+    train_y_ves = torch.Tensor([objective(x) for x in train_x_ves]).unsqueeze(1).to(dtype=torch.double, device=device)
 
     if run_ei:
         train_x_ei = train_x_ves.clone()
@@ -879,7 +890,7 @@ if __name__ == "__main__":
         train_x_mes = train_x_ves.clone()
         train_y_mes = train_y_ves.clone()
 
-    bounds = torch.zeros(D, 2)
+    bounds = torch.zeros(D, 2, dtype=torch.double, device=device)
     bounds[:, 1] = 1
 
     # partial function to get the GP that already has the lengthscale, noise, and outputscale set
@@ -900,7 +911,7 @@ if __name__ == "__main__":
         gp_mes = _get_gp(train_x_mes, train_y_mes)
         mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)  # mll object
         fit_mll_with_adam_backup(mll_mes)  # fit mll hyperparameters
-        candidate_set = SobolEngine(dimension=bounds.shape[0], scramble=True).draw(2048)
+        candidate_set = SobolEngine(dimension=bounds.shape[0], scramble=True).draw(2048).to(device=device)
         mes_model = qMaxValueEntropy(gp_mes, candidate_set)
     else:
         gp_ves = _get_gp(train_x_ves, train_y_ves)
@@ -914,7 +925,8 @@ if __name__ == "__main__":
             paths=paths,
             clamp_min=clamp_min,
             acqf_options=acqf_options,
-            stop_tolerance_coeff=stop_tolerance_coeff
+            stop_tolerance_coeff=stop_tolerance_coeff,
+            device=device,
         )
         k_vals = []
         beta_vals = []
@@ -924,7 +936,7 @@ if __name__ == "__main__":
     for bo_iter in range(args.num_bo_iter):
         print(f"+++ Iteration {bo_iter} +++")
         # Define an intial point for VES-Gamma
-        X = torch.rand(1, 1, D)
+        X = torch.rand(1, 1, D, dtype=torch.double, device=device)
         if run_ei:
             ei_candidate, acq_value = optimize_acqf(
                 ei_model,
@@ -940,8 +952,8 @@ if __name__ == "__main__":
             )
             train_y_ei = torch.cat([train_y_ei, f_ei.reshape(1, 1)], dim=0)
             # save the results
-            np.save(f"runs/{run_dir}/train_x_ei.npy", train_x_ei.detach().numpy())
-            np.save(f"runs/{run_dir}/train_y_ei.npy", train_y_ei.detach().numpy())
+            np.save(f"runs/{run_dir}/train_x_ei.npy", train_x_ei.detach().cpu().numpy())
+            np.save(f"runs/{run_dir}/train_y_ei.npy", train_y_ei.detach().cpu().numpy())
 
             # get gp hyperparameters as dictionary
             gp_dict = gp_ei.state_dict()
@@ -967,13 +979,13 @@ if __name__ == "__main__":
             )
             train_y_mes = torch.cat([train_y_mes, f_mes.reshape(1, 1)], dim=0)
             # save the results
-            np.save(f"runs/{run_dir}/train_x_mes.npy", train_x_mes.detach().numpy())
-            np.save(f"runs/{run_dir}/train_y_mes.npy", train_y_mes.detach().numpy())
+            np.save(f"runs/{run_dir}/train_x_mes.npy", train_x_mes.detach().cpu().numpy())
+            np.save(f"runs/{run_dir}/train_y_mes.npy", train_y_mes.detach().cpu().numpy())
 
             # get gp hyperparameters as dictionary
             gp_dict = gp_mes.state_dict()
             # save gp hyperparameters to json
-            #torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_mes_iter{bo_iter}.pth")
+            # torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_mes_iter{bo_iter}.pth")
             # save gp hyperparameters to tar.xz
             with tarfile.open(f"runs/{run_dir}/hyperparameters.tar.xz", "w:xz") as tar:
                 gp_dict_file = io.BytesIO()
@@ -996,8 +1008,8 @@ if __name__ == "__main__":
             print(f"VES: cand={ves_candidate}, acq_val={v:.3e}, f_val={f_ves.item():.3e}, f_max={train_y_ves.max()}")
             train_y_ves = torch.cat([train_y_ves, f_ves.reshape(1, 1)], dim=0)
             # save the results
-            np.save(f"runs/{run_dir}/train_x_ves.npy", train_x_ves.detach().numpy())
-            np.save(f"runs/{run_dir}/train_y_ves.npy", train_y_ves.detach().numpy())
+            np.save(f"runs/{run_dir}/train_x_ves.npy", train_x_ves.detach().cpu().numpy())
+            np.save(f"runs/{run_dir}/train_y_ves.npy", train_y_ves.detach().cpu().numpy())
 
             # save k_vals and beta_vals
             np.save(f"runs/{run_dir}/k_vals.npy", np.array(k_vals))
@@ -1006,7 +1018,7 @@ if __name__ == "__main__":
             # get gp hyperparameters as dictionary
             gp_dict = gp_ves.state_dict()
             # save gp hyperparameters to json
-            #torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ves_iter{bo_iter}.pth")
+            # torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ves_iter{bo_iter}.pth")
             # save gp hyperparameters to tar.xz
             with tarfile.open(f"runs/{run_dir}/hyperparameters.tar.xz", "w:xz") as tar:
                 gp_dict_file = io.BytesIO()
@@ -1029,6 +1041,7 @@ if __name__ == "__main__":
                 paths=paths,
                 clamp_min=clamp_min,
                 acqf_options=acqf_options,
+                device=device,
             )
 
             _time_passed = time.time() - start_time
