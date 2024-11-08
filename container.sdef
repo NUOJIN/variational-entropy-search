@@ -7,11 +7,12 @@ Stage: build
     export PATH="/root/.local/bin:$PATH"
 
 %files
-    ./ves.py /opt/variational-entropy-search/
-    ./util.py /opt/variational-entropy-search/
+    ./ves /opt/variational-entropy-search/
     ./requirements.txt /opt/variational-entropy-search/
 
 %post
+    ls /opt/variational-entropy-search
+    ls /opt/variational-entropy-search/ves
     cd /opt/variational-entropy-search
     rm -rf runs/* || true
     rm -rf runs2/* || true
@@ -38,4 +39,4 @@ Stage: build
 %runscript
     echo "Container was created"
     echo "Arguments received: $*"
-    bash -c "PATH='/opt/poetry/bin:$PATH' cd /opt/variational-entropy-search && python3 ves.py $*"
+    bash -c "PATH='/opt/poetry/bin:$PATH' cd /opt/variational-entropy-search && python3 ves/main.py $*"

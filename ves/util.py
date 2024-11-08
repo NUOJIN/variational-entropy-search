@@ -27,6 +27,44 @@ from scipy.optimize import optimize
 from torch import Tensor, Size
 from torch.quasirandom import SobolEngine
 
+AVAILABLE_BENCHMARKS = ["lasso-dna",
+                        "lasso-high",
+                        "lasso-hard",
+                        "mopta08",
+                        "svm",
+                        "mujoco-ant",
+                        "mujoco-humanoid",
+                        "robotpushing",
+                        "lasso-breastcancer",
+                        "rover",
+                        "hartmann6",
+                        "branin2",
+                        "prior_sample_10d_ls0.5",
+                        "prior_sample_10d_ls1",
+                        "prior_sample_10d_ls2",
+                        "prior_sample_50d_ls0.5",
+                        "prior_sample_50d_ls1",
+                        "prior_sample_50d_ls2",
+                        "prior_sample_100d_ls0.5",
+                        "prior_sample_100d_ls1",
+                        "prior_sample_100d_ls2",
+                        "prior_sample_2d_ls0.5",
+                        "prior_sample_2d_ls1",
+                        "prior_sample_2d_ls2",
+                        "prior_sample_2d_ls0.1",
+                        "prior_sample_2d_ls0.05",
+                        "mujoco-halfcheetah",
+                        "mujoco-walker",
+                        "schwefel100",
+                        "schwefel300",
+                        "schwefel500",
+                        "levy100",
+                        "levy300",
+                        "levy500",
+                        "griewank100",
+                        "griewank300",
+                        "griewank500", ]
+
 
 def str2bool(
         string_value: str
