@@ -36,10 +36,11 @@ from botorch.sampling.pathwise import draw_matheron_paths, MatheronPath
 from botorch.test_functions import Hartmann, Branin, Levy, Griewank
 from gpytorch.kernels import ScaleKernel, MaternKernel
 from gpytorch.mlls import ExactMarginalLogLikelihood
+from gpytorch.models import GP
 from gpytorch.priors import GammaPrior, LogNormalPrior
 from linear_operator.utils.errors import NotPSDError
 from scipy import optimize
-from torch import Tensor
+from torch import Tensor, Size
 
 
 @contextmanager
@@ -340,6 +341,24 @@ def str2bool(
     else:
         raise ValueError("Invalid boolean value")
 
+def robust_draw_matheron_paths(
+        model: GP,
+        sample_shape: Size,
+        **kwargs: Any,
+) -> MatheronPath:
+    """
+    Wrapper around draw_matheron_paths that sets the number of Cholesky decomposition tries to 9.
+
+    Args:
+        *args: the arguments to draw_matheron_paths
+        **kwargs: the keyword arguments to draw_matheron_paths
+
+    Returns:
+        MatheronPath: the Matheron path
+
+    """
+    with gpytorch.settings.cholesky_max_tries(9):
+        return draw_matheron_paths(model, sample_shape, **kwargs)
 
 def optimize_posterior_samples(
         paths,
@@ -615,7 +634,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             if torch.norm(new_X - cur_X) < self.stop_tolerance_coeff * self.bounds.size(0):
                 break
             cur_X = new_X
-            self.paths = draw_matheron_paths(self.model, torch.Size([num_paths]))
+            self.paths = robust_draw_matheron_paths(self.model, torch.Size([num_paths]))
             self.optimal_outputs = optimize_posterior_samples(
                 self.paths,
                 self.bounds,
@@ -926,7 +945,7 @@ if __name__ == "__main__":
         gp_ves = _get_gp(train_x_ves, train_y_ves)
         mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
         fit_mll_with_adam_backup(mll_ves)  # fit mll hyperparameters
-        paths = draw_matheron_paths(gp_ves, torch.Size([num_paths]))
+        paths = robust_draw_matheron_paths(gp_ves, torch.Size([num_paths]))
         ves_model = ves_class(
             gp_ves,
             best_f=train_y_ves.max(),
@@ -1042,7 +1061,7 @@ if __name__ == "__main__":
             mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
             fit_mll_with_adam_backup(mll_ves)  # fit mll hyperpara
 
-            paths = draw_matheron_paths(gp_ves, torch.Size([num_paths]))
+            paths = robust_draw_matheron_paths(gp_ves, torch.Size([num_paths]))
             ves_model = ves_class(
                 gp_ves,
                 best_f=train_y_ves.max(),
