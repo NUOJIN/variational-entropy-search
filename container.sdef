@@ -8,11 +8,10 @@ Stage: build
 
 %files
     ./ves /opt/variational-entropy-search/
-    ./requirements.txt /opt/variational-entropy-search/
+    ./pyproject.toml /opt/variational-entropy-search/
+    ./poetry.lock /opt/variational-entropy-search/
 
 %post
-    ls /opt/variational-entropy-search
-    ls /opt/variational-entropy-search/ves
     cd /opt/variational-entropy-search
     rm -rf runs/* || true
     rm -rf runs2/* || true
@@ -25,12 +24,16 @@ Stage: build
     rm -r figures || true
     rm -r runs || true
 
-    pip install -r requirements.txt
+    export POETRY_VIRTUALENVS_PATH=/opt/virtualenvs
+    export POETRY_HOME=/opt/poetry
+    curl -sSL https://install.python-poetry.org | python3.11 -
+
+    poetry install --no-root --no-dev
 
     # clean up
     rm -rf /var/lib/apt/lists/*
     rm -rf /root/.cache/pip/*
-
+    rm -rf /root/.cache/pypoetry/*
 
 %startscript
     echo "Starting container"

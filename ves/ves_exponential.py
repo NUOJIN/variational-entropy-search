@@ -1,12 +1,13 @@
 from copy import deepcopy
 from typing import Union, Any
 
+import gpytorch
 import torch
 from botorch.acquisition import MCAcquisitionFunction
 from botorch.models.model import Model
 from botorch.optim import optimize_acqf
 
-from ves.main import HalfVESGamma
+from ves.half_ves import HalfVES
 from ves.util import optimize_posterior_samples
 
 
@@ -71,7 +72,7 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
         # solve beta (or lambda)
         betaval = torch.ones(current_x.shape[0])
         kval = torch.ones_like(betaval)
-        halfVES = HalfVESGamma(
+        halfVES = HalfVES(
             self.model,
             self.best_f,
             self.paths,
@@ -81,12 +82,13 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
             self.clamp_min
         )
         # Step 2: Given k and beta, find optimal X
-        current_x, acq_value = optimize_acqf(
-            halfVES,
-            bounds=self.bounds.T,
-            q=1,  # Number of candidates to optimize for
-            **self.optimize_acqf_options
-        )
+        with gpytorch.settings.cholesky_max_tries(9):
+            current_x, acq_value = optimize_acqf(
+                halfVES,
+                bounds=self.bounds.T,
+                q=1,  # Number of candidates to optimize for
+                **self.optimize_acqf_options
+            )
 
         return current_x, acq_value, kval.item(), betaval.item()
 

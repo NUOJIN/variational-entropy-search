@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "ves"
+version = "0.1.0"
+description = ""
+authors = ["Nuojing Chen <nuch1756@colorado.edu>, Leonard Papenmeier <leonard.papenmeier@cs.lth.se>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+botorch = "^0.11.3"
+bencherscaffold = "^0.1.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
