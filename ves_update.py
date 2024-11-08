@@ -774,7 +774,7 @@ if __name__ == "__main__":
     argparse = ArgumentParser()
     argparse.add_argument("--num_paths", type=int, default=64, help="Number of paths to sample")
     argparse.add_argument("--num_iter", type=int, default=50, help="Number of iterations for VES")
-    argparse.add_argument("--num_bo_iter", type=int, default=10)
+    argparse.add_argument("--num_bo_iter", type=int, default=500)
     argparse.add_argument("--n_init", type=int, default=20)
     argparse.add_argument("--clamp_min", type=float, default=1e-10)
     argparse.add_argument("--acqf_raw_samples", type=int, default=512)
