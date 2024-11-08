@@ -176,7 +176,7 @@ def get_objective(
             elif args.benchmark.startswith('levy'):
                 # name is something like levy300
                 dim = int(args.benchmark[4:])
-                levy_bounds = torch.tensor([[-10, 10]] * dim).T
+                levy_bounds = torch.tensor([[-10, 10]] * dim, dtype=torch.double, device=device).T
                 x_eval = x * (levy_bounds[1] - levy_bounds[0]) + levy_bounds[0]
 
                 _f = Levy(negate=True, dim=dim)
@@ -184,7 +184,7 @@ def get_objective(
             elif args.benchmark.startswith('griewank'):
                 # name is something like griewank300
                 dim = int(args.benchmark[8:])
-                griewank_bounds = torch.tensor([[-600, 600]] * dim).T
+                griewank_bounds = torch.tensor([[-600, 600]] * dim, dtype=torch.double, device=device).T
                 x_eval = x * (griewank_bounds[1] - griewank_bounds[0]) + griewank_bounds[0]
 
                 _f = Griewank(negate=True, dim=dim)
@@ -192,7 +192,7 @@ def get_objective(
             elif args.benchmark.startswith('schwefel'):
                 # name is something like schwefel300
                 dim = int(args.benchmark[8:])
-                schwefel_bounds = torch.tensor([[-500, 500]] * dim).T
+                schwefel_bounds = torch.tensor([[-500, 500]] * dim, dtype=torch.double, device=device).T
                 x_eval = x * (schwefel_bounds[1] - schwefel_bounds[0]) + schwefel_bounds[0]
 
                 def schwefel(
@@ -207,7 +207,7 @@ def get_objective(
 
             elif args.benchmark == 'branin2':
 
-                branin_bounds = torch.tensor([[-5, 10], [0, 15]]).T
+                branin_bounds = torch.tensor([[-5, 10], [0, 15]], dtype=torch.double, device=device).T
                 x_eval = x * (branin_bounds[1] - branin_bounds[0]) + branin_bounds[0]
 
                 _f = Branin(negate=True)
@@ -246,7 +246,7 @@ def get_objective(
             # negate the result since we are maximizing
             _res = -res.value
             # to torch.double
-            return torch.tensor(_res, dtype=torch.double)
+            return torch.tensor(_res, dtype=torch.double, device=device)
         elif benchmark_type == BenchmarkType.GP_PRIOR_SAMPLE:
             prior_sample_gp_covar_module = MaternKernel(
                 nu=2.5,
