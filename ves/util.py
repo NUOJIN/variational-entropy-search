@@ -124,7 +124,7 @@ def fit_mll_with_adam_backup(
     with gpytorch.settings.cholesky_max_tries(9):
         try:
             fit_gpytorch_mll(mll)
-        except Exception as e:
+        except NotPSDError as e:
             try:
                 warnings.warn(f"Error fitting MLL with L-BFGS: {e}. Running Adam-based optimization...")
                 optimizer = torch.optim.Adam(mll.parameters(), lr=0.1)
@@ -513,7 +513,7 @@ def get_objective(
             )
 
             with torch_random_seed(42):
-                prior_sample_gp_path = draw_matheron_paths(
+                prior_sample_gp_path = robust_draw_matheron_paths(
                     model=deepcopy(prior_sample_gp),
                     sample_shape=torch.Size([1]),
                 )
