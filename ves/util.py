@@ -171,9 +171,9 @@ def get_gp(
     D = train_x.shape[-1]
 
     if lengthscale_prior == "bounce" or lengthscale_prior is None:
-        _lengthscale_prior = GammaPrior(3.0, 6.0)
+        _lengthscale_prior = GammaPrior(3.0, 6.0).to(train_x)
     elif lengthscale_prior == "vbo":
-        _lengthscale_prior = LogNormalPrior(math.sqrt(2) + math.log(D) / 2, math.sqrt(3))
+        _lengthscale_prior = LogNormalPrior(math.sqrt(2) + math.log(D) / 2, math.sqrt(3)).to(train_x)
 
     covar_module = ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=_lengthscale_prior))
     if gp_lengthscale is not None:
