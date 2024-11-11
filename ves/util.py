@@ -171,9 +171,13 @@ def get_gp(
     D = train_x.shape[-1]
 
     if lengthscale_prior == "bounce" or lengthscale_prior is None:
-        _lengthscale_prior = GammaPrior(3.0, 6.0).to(train_x)
+        loc = torch.tensor(3.0).to(train_x)
+        scale = torch.tensor(6.0).to(train_x)
+        _lengthscale_prior = GammaPrior(loc, scale)
     elif lengthscale_prior == "vbo":
-        _lengthscale_prior = LogNormalPrior(math.sqrt(2) + math.log(D) / 2, math.sqrt(3)).to(train_x)
+        loc = torch.tensor(math.log(2.0) + math.log(D) / 2).to(train_x)
+        scale = torch.tensor(math.sqrt(3.0)).to(train_x)
+        _lengthscale_prior = LogNormalPrior(loc, scale)
 
     covar_module = ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=_lengthscale_prior))
     if gp_lengthscale is not None:
