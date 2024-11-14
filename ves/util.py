@@ -13,6 +13,7 @@ import torch
 from bencherscaffold.bencher_pb2 import BenchmarkRequest
 from bencherscaffold.bencher_pb2_grpc import BencherStub
 from botorch import fit_gpytorch_mll
+from botorch.exceptions import ModelFittingError
 from botorch.models import SingleTaskGP
 from botorch.models.transforms import Standardize
 from botorch.models.utils.gpytorch_modules import get_gaussian_likelihood_with_gamma_prior
@@ -124,7 +125,7 @@ def fit_mll_with_adam_backup(
     with gpytorch.settings.cholesky_max_tries(9):
         try:
             fit_gpytorch_mll(mll)
-        except NotPSDError as e:
+        except (NotPSDError, ModelFittingError) as e:
             try:
                 warnings.warn(f"Error fitting MLL with L-BFGS: {e}. Running Adam-based optimization...")
                 optimizer = torch.optim.Adam(mll.parameters(), lr=0.1)
@@ -137,7 +138,7 @@ def fit_mll_with_adam_backup(
                     loss.backward()
                     optimizer.step()
                 mll.eval()
-            except NotPSDError:
+            except (NotPSDError, ModelFittingError):
                 warnings.warn("Adam optimizer failed to converge. Skipping model fitting.")
                 mll.eval()
 
