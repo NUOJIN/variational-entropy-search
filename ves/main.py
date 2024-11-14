@@ -178,7 +178,15 @@ if __name__ == "__main__":
             # get gp hyperparameters as dictionary
             gp_dict = gp_ei.state_dict()
             # save gp hyperparameters to json
-            torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ei_iter{bo_iter}.pth")
+            #torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ei_iter{bo_iter}.pth")
+            # save gp hyperparameters to tar.xz
+            with tarfile.open(f"runs/{run_dir}/hyperparameters.tar.xz", "w:xz") as tar:
+                gp_dict_file = io.BytesIO()
+                torch.save(gp_dict, gp_dict_file)
+                gp_dict_file.seek(0)
+                tarinfo = tarfile.TarInfo(f"gp_hyperparameters_ei_iter{bo_iter}.pth")
+                tarinfo.size = len(gp_dict_file.getbuffer())
+                tar.addfile(tarinfo, gp_dict_file)
 
             gp_ei = _get_gp(train_x_ei, train_y_ei)
             mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
