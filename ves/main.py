@@ -26,6 +26,7 @@ from ves.util import (
 )
 from ves.ves_exponential import VariationalEntropySearchExponential
 from ves.ves_gamma import VariationalEntropySearchGamma
+from ves.ves_gamma_seq_k import VariationalEntropySearchGammaSeqK
 
 if __name__ == "__main__":
     # Test VES on a trivial example (D=5)
@@ -35,12 +36,14 @@ if __name__ == "__main__":
     argparse.add_argument("--num_iter", type=int, default=50, help="Number of iterations for VES")
     argparse.add_argument("--num_bo_iter", type=int, default=500)
     argparse.add_argument("--n_init", type=int, default=20)
+    argparse.add_argument("--k_init", type=float, default=20.0)
     argparse.add_argument("--clamp_min", type=float, default=1e-10)
     argparse.add_argument("--acqf_raw_samples", type=int, default=512)
     argparse.add_argument("--acqf_num_restarts", type=int, default=5)
     argparse.add_argument("--sample_around_best", type=str2bool, default=True)
     argparse.add_argument("--run_ei", type=str2bool, default=False)
     argparse.add_argument("--run_mes", type=str2bool, default=False)
+    argparse.add_argument("--run_vesseq", type=str2bool, default=False)
     argparse.add_argument("--exponential_family", type=str2bool, default=False)
     argparse.add_argument("--set_lengthscale", type=float, default=None)
     argparse.add_argument("--set_noise", type=float, default=None)
@@ -60,6 +63,8 @@ if __name__ == "__main__":
     clamp_min = args.clamp_min
     run_ei = args.run_ei
     run_mes = args.run_mes
+    run_vesseq = args.run_vesseq
+    init_k = args.k_init
     gp_lengthscale = args.set_lengthscale
     gp_noise = args.set_noise
     gp_outputscale = args.set_outputscale
@@ -109,6 +114,9 @@ if __name__ == "__main__":
     if run_mes:
         train_x_mes = train_x_ves.clone()
         train_y_mes = train_y_ves.clone()
+    if run_vesseq:
+        train_x_vesseq = train_x_ves.clone()
+        train_y_vesseq = train_y_ves.clone()
 
     bounds = torch.zeros(D, 2, dtype=torch.double, device=device)
     bounds[:, 1] = 1
@@ -133,6 +141,18 @@ if __name__ == "__main__":
         fit_mll_with_adam_backup(mll_mes)  # fit mll hyperparameters
         candidate_set = SobolEngine(dimension=bounds.shape[0], scramble=True).draw(2048).to(device=device)
         mes_model = qMaxValueEntropy(gp_mes, candidate_set)
+    elif run_vesseq:
+        gp_vesseq = _get_gp(train_x_vesseq, train_y_vesseq)
+        mll_vesseq = ExactMarginalLogLikelihood(gp_vesseq.likelihood, gp_vesseq)  # mll object
+        fit_mll_with_adam_backup(mll_vesseq)  # fit mll hyperparameters
+        vesseq_model = VariationalEntropySearchGammaSeqK(
+            gp_vesseq, 
+            best_f=train_y_vesseq.max(), 
+            num_paths=num_paths, 
+            clamp_min=clamp_min, 
+            k=init_k,
+            bounds=bounds,
+        )
     else:
         gp_ves = _get_gp(train_x_ves, train_y_ves)
         mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
@@ -227,6 +247,48 @@ if __name__ == "__main__":
             mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)
             fit_mll_with_adam_backup(mll_mes)
             mes_model = qMaxValueEntropy(gp_mes, candidate_set)
+        elif run_vesseq:
+            vesseq_candidate, acq_value = optimize_acqf(
+                vesseq_model,
+                bounds=bounds.T,
+                q=1,  # Number of candidates to optimize for
+                num_restarts=args.acqf_num_restarts,
+                raw_samples=args.acqf_raw_samples,
+            )
+            train_x_vesseq = torch.cat([train_x_vesseq, vesseq_candidate], dim=0)
+            f_vesseq = objective(vesseq_candidate)
+            print(
+                f"VESSeq: cand={vesseq_candidate}, acq_val={acq_value:.3e}, f_val={f_vesseq.item():.3e}, f_max={train_y_vesseq.max()}"
+            )
+            train_y_vesseq = torch.cat([train_y_vesseq, f_vesseq.reshape(1, 1)], dim=0)
+            # save the results
+            np.save(f"runs/{run_dir}/train_x_vesseq.npy", train_x_vesseq.detach().cpu().numpy())
+            np.save(f"runs/{run_dir}/train_y_vesseq.npy", train_y_vesseq.detach().cpu().numpy())
+
+            # get gp hyperparameters as dictionary
+            gp_dict = gp_vesseq.state_dict()
+            # save gp hyperparameters to json
+            # torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_mes_iter{bo_iter}.pth")
+            # save gp hyperparameters to tar.xz
+            with tarfile.open(f"runs/{run_dir}/hyperparameters.tar.xz", "w:xz") as tar:
+                gp_dict_file = io.BytesIO()
+                torch.save(gp_dict, gp_dict_file)
+                gp_dict_file.seek(0)
+                tarinfo = tarfile.TarInfo(f"gp_hyperparameters_vesseq_iter{bo_iter}.pth")
+                tarinfo.size = len(gp_dict_file.getbuffer())
+                tar.addfile(tarinfo, gp_dict_file)
+
+            gp_vesseq = _get_gp(train_x_vesseq, train_y_vesseq)
+            mll_vesseq = ExactMarginalLogLikelihood(gp_vesseq.likelihood, gp_vesseq)
+            fit_mll_with_adam_backup(mll_vesseq)
+            vesseq_model = VariationalEntropySearchGammaSeqK(
+                gp_vesseq, 
+                best_f=train_y_vesseq.max(), 
+                num_paths=num_paths, 
+                clamp_min=clamp_min, 
+                k=init_k / np.log(2 + bo_iter),
+                bounds=bounds,
+            )
         else:
             ves_candidate, v, k_val, beta_val = ves_model(X, num_paths=num_paths, num_iter=args.num_iter)
             k_vals.append(k_val)
