@@ -152,6 +152,7 @@ if __name__ == "__main__":
             clamp_min=clamp_min, 
             k=init_k,
             bounds=bounds,
+            device=device,
         )
     else:
         gp_ves = _get_gp(train_x_ves, train_y_ves)
@@ -288,6 +289,7 @@ if __name__ == "__main__":
                 clamp_min=clamp_min, 
                 k=init_k / np.log(2 + bo_iter),
                 bounds=bounds,
+                device=device
             )
         else:
             ves_candidate, v, k_val, beta_val = ves_model(X, num_paths=num_paths, num_iter=args.num_iter)

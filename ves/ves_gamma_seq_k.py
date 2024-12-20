@@ -1,8 +1,6 @@
 from copy import deepcopy
 from typing import Union, Any
 
-import gpytorch
-import numpy as np
 import torch
 from botorch.acquisition import MCAcquisitionFunction
 from botorch.models.model import Model
