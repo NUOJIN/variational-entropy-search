@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import os
 import tarfile
 import time
@@ -36,7 +37,7 @@ if __name__ == "__main__":
     argparse.add_argument("--num_iter", type=int, default=50, help="Number of iterations for VES")
     argparse.add_argument("--num_bo_iter", type=int, default=500)
     argparse.add_argument("--n_init", type=int, default=20)
-    argparse.add_argument("--k_init", type=float, default=20.0)
+    argparse.add_argument("--k_init", type=float, default=None)
     argparse.add_argument("--clamp_min", type=float, default=1e-10)
     argparse.add_argument("--acqf_raw_samples", type=int, default=512)
     argparse.add_argument("--acqf_num_restarts", type=int, default=5)
@@ -79,6 +80,11 @@ if __name__ == "__main__":
 
     # Define the objective function
     objective, D = get_objective(benchmark_name=args.benchmark, device=device)
+
+    # if init_k is None, use D as the default value
+    if init_k is None:
+        print("Using D as the default value for k")
+        init_k = D
 
     args_dir = vars(args)
     # calculate run_dir hash with adler32
@@ -282,12 +288,16 @@ if __name__ == "__main__":
             gp_vesseq = _get_gp(train_x_vesseq, train_y_vesseq)
             mll_vesseq = ExactMarginalLogLikelihood(gp_vesseq.likelihood, gp_vesseq)
             fit_mll_with_adam_backup(mll_vesseq)
+            k_plus = init_k-1
+            # set up the decay rate so that the final k is 1.05
+            decay_rate = (math.log(k_plus) - math.log(0.05))/args.num_bo_iter
             vesseq_model = VariationalEntropySearchGammaSeqK(
                 gp_vesseq, 
                 best_f=train_y_vesseq.max(), 
                 num_paths=num_paths, 
                 clamp_min=clamp_min, 
-                k=init_k / np.log(2 + bo_iter),
+                #k=init_k / np.log(2 + bo_iter),
+                k=(init_k-1)*math.exp(-decay_rate*bo_iter) + 1,
                 bounds=bounds,
                 device=device
             )
