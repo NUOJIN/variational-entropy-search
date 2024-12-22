@@ -23,7 +23,7 @@ from ves.util import (
     get_gp,
     fit_mll_with_adam_backup,
     robust_draw_matheron_paths,
-    get_objective, AVAILABLE_BENCHMARKS,
+    get_objective, AVAILABLE_BENCHMARKS, init_samples,
 )
 from ves.ves_exponential import VariationalEntropySearchExponential
 from ves.ves_gamma import VariationalEntropySearchGamma
@@ -111,7 +111,8 @@ if __name__ == "__main__":
     }
 
     n_init = args.n_init
-    train_x_ves = torch.rand(n_init, D, dtype=torch.double, device=device)
+    #train_x_ves = torch.rand(n_init, D, dtype=torch.double, device=device)
+    train_x_ves = init_samples(n_init=n_init, dim=D, seed = os.environ.get("SLURM_ARRAY_TASK_ID", None)).to(dtype=torch.double, device=device)
     train_y_ves = torch.Tensor([objective(x) for x in train_x_ves]).unsqueeze(1).to(dtype=torch.double, device=device)
 
     if run_ei:

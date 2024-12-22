@@ -90,7 +90,7 @@ def str2bool(
 
 @contextmanager
 def torch_random_seed(
-        seed: int,
+        seed: int | None
 ):
     """
     Sets the random seed for torch operations within the context.
@@ -102,7 +102,8 @@ def torch_random_seed(
     seed is reset to its original value.
     """
     torch_state = torch.random.get_rng_state()
-    torch.manual_seed(seed)
+    if seed is not None:
+        torch.manual_seed(seed)
     try:
         yield
     finally:
@@ -527,3 +528,28 @@ def get_objective(
             raise ValueError("Invalid benchmark type")
 
     return objective, benchmark_dim
+
+
+def init_samples(
+        n_init: int,
+        dim: int,
+        seed: int | None
+) -> Tensor:
+    """
+    Initialize samples using Sobol sequence
+
+    Args:
+        n_init: Number of initial samples
+        dim: Dimensionality of the problem
+        seed: Random seed
+
+    Returns:
+        Tensor: The initial samples
+
+    """
+
+    with torch_random_seed(seed):
+        sobol = SobolEngine(dim)
+        X_init = sobol.draw(n_init).to(dtype=torch.double)
+
+    return X_init
