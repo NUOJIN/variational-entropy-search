@@ -289,7 +289,7 @@ if __name__ == "__main__":
             gp_vesseq = _get_gp(train_x_vesseq, train_y_vesseq)
             mll_vesseq = ExactMarginalLogLikelihood(gp_vesseq.likelihood, gp_vesseq)
             fit_mll_with_adam_backup(mll_vesseq)
-            k_plus = init_k-1
+            k_plus = init_k-0.5
             # set up the decay rate so that the final k is 1.05
             decay_rate = (math.log(k_plus) - math.log(0.05))/args.num_bo_iter
             vesseq_model = VariationalEntropySearchGammaSeqK(
