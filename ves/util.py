@@ -549,7 +549,7 @@ def init_samples(
     """
 
     with torch_random_seed(seed):
-        sobol = SobolEngine(dim)
+        sobol = SobolEngine(dim, scramble=True)
         X_init = sobol.draw(n_init).to(dtype=torch.double)
 
     return X_init
