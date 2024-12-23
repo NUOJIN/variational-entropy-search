@@ -45,6 +45,8 @@ if __name__ == "__main__":
     argparse.add_argument("--run_ei", type=str2bool, default=False)
     argparse.add_argument("--run_mes", type=str2bool, default=False)
     argparse.add_argument("--run_vesseq", type=str2bool, default=False)
+    argparse.add_argument("--decay_target", type=int, default=None, help="The number of iterations to reach the final k (num_bo_iter if None)")
+    argparse.add_argument("--k_target", type=float, default=0.5, help="The final k value")
     argparse.add_argument("--exponential_family", type=str2bool, default=False)
     argparse.add_argument("--set_lengthscale", type=float, default=None)
     argparse.add_argument("--set_noise", type=float, default=None)
@@ -289,16 +291,20 @@ if __name__ == "__main__":
             gp_vesseq = _get_gp(train_x_vesseq, train_y_vesseq)
             mll_vesseq = ExactMarginalLogLikelihood(gp_vesseq.likelihood, gp_vesseq)
             fit_mll_with_adam_backup(mll_vesseq)
-            k_plus = init_k-0.5
+            k_target = args.k_target
+            k_plus = init_k - k_target
+            decay_target = args.decay_target if args.decay_target is not None else args.num_bo_iter
             # set up the decay rate so that the final k is 1.05
-            decay_rate = (math.log(k_plus) - math.log(0.05))/args.num_bo_iter
+            decay_rate = (math.log(k_plus) - math.log(0.05))/decay_target
+            k_next = (init_k - k_target) * math.exp(-decay_rate * bo_iter) + k_target
+            print(f"Next k: {k_next}")
             vesseq_model = VariationalEntropySearchGammaSeqK(
                 gp_vesseq, 
                 best_f=train_y_vesseq.max(), 
                 num_paths=num_paths, 
                 clamp_min=clamp_min, 
                 #k=init_k / np.log(2 + bo_iter),
-                k=(init_k-1)*math.exp(-decay_rate*bo_iter) + 1,
+                k=k_next,
                 bounds=bounds,
                 device=device
             )
