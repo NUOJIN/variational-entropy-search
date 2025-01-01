@@ -18,7 +18,7 @@ from botorch.models import SingleTaskGP
 from botorch.models.transforms import Standardize
 from botorch.models.utils.gpytorch_modules import get_gaussian_likelihood_with_gamma_prior
 from botorch.sampling.pathwise import MatheronPath, draw_matheron_paths
-from botorch.test_functions import Hartmann, Levy, Griewank, Branin
+from botorch.test_functions import Hartmann, Levy, Griewank, Branin, Ackley, Michalewicz
 from gpytorch import ExactMarginalLogLikelihood
 from gpytorch.kernels import ScaleKernel, MaternKernel
 from gpytorch.models import GP
@@ -28,7 +28,8 @@ from scipy.optimize import optimize
 from torch import Tensor, Size
 from torch.quasirandom import SobolEngine
 
-AVAILABLE_BENCHMARKS = ["lasso-dna",
+AVAILABLE_BENCHMARKS = ['ackley2',
+                        "lasso-dna",
                         "lasso-high",
                         "lasso-hard",
                         "mopta08",
@@ -59,9 +60,12 @@ AVAILABLE_BENCHMARKS = ["lasso-dna",
                         "schwefel100",
                         "schwefel300",
                         "schwefel500",
+                        'levy4',
                         "levy100",
                         "levy300",
                         "levy500",
+                        'michalewicz10',
+                        'griewank8',
                         "griewank100",
                         "griewank300",
                         "griewank500", ]
@@ -339,6 +343,9 @@ def get_objective(
     """
 
     match benchmark_name:
+        case 'ackley2':
+            benchmark_dim = 2
+            benchmark_type = BenchmarkType.BOTORCH
         case "lasso-dna":
             benchmark_dim = 180
             benchmark_type = BenchmarkType.BENCHER
@@ -381,6 +388,9 @@ def get_objective(
         case 'branin2':
             benchmark_dim = 2
             benchmark_type = BenchmarkType.BOTORCH
+        case 'levy4':
+            benchmark_dim = 4
+            benchmark_type = BenchmarkType.BOTORCH
         case 'levy100':
             benchmark_dim = 100
             benchmark_type = BenchmarkType.BOTORCH
@@ -389,6 +399,12 @@ def get_objective(
             benchmark_type = BenchmarkType.BOTORCH
         case 'levy500':
             benchmark_dim = 500
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'michalewicz10':
+            benchmark_dim = 10
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'griewank8':
+            benchmark_dim = 8
             benchmark_type = BenchmarkType.BOTORCH
         case 'griewank100':
             benchmark_dim = 100
@@ -432,6 +448,14 @@ def get_objective(
             if benchmark_name == 'hartmann6':
                 _f = Hartmann(negate=True)
                 return _f(x)
+            elif benchmark_name.startswith('ackley'):
+                # name is something like ackley2
+                dim = int(benchmark_name[6:])
+                ackley_bounds = torch.tensor([[-32.768, 32.768]] * dim, dtype=torch.double, device=device).T
+                x_eval = x * (ackley_bounds[1] - ackley_bounds[0]) + ackley_bounds[0]
+
+                _f = Ackley(negate=True, dim=dim)
+                return _f(x_eval)
             elif benchmark_name.startswith('levy'):
                 # name is something like levy300
                 dim = int(benchmark_name[4:])
@@ -439,6 +463,14 @@ def get_objective(
                 x_eval = x * (levy_bounds[1] - levy_bounds[0]) + levy_bounds[0]
 
                 _f = Levy(negate=True, dim=dim)
+                return _f(x_eval)
+            elif benchmark_name.startswith('michalewicz'):
+                # name is something like michalewicz10
+                dim = int(benchmark_name[11:])
+                michalewicz_bounds = torch.tensor([[0, math.pi]] * dim, dtype=torch.double, device=device).T
+                x_eval = x * (michalewicz_bounds[1] - michalewicz_bounds[0]) + michalewicz_bounds[0]
+
+                _f = Michalewicz(negate=True, dim=dim)
                 return _f(x_eval)
             elif benchmark_name.startswith('griewank'):
                 # name is something like griewank300
