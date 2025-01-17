@@ -12,10 +12,9 @@ bencherscaffold = "^0.1.2"
 cython = "^3.0.11"
 notebook = "^7.3.2"
 jupyter = "^1.1.1"
-
-[tool.poetry.group.dev.dependencies]
-matplotlib = "^3.9.2"
-jupyterlab = "^4.3.0"
+matplotlib = "^3.10.0"
+numpy = "~1.26.0"
+scipy = "^1.15.1"
 
 [build-system]
 requires = ["poetry-core"]
