@@ -42,4 +42,4 @@ Stage: build
 %runscript
     echo "Container was created"
     echo "Arguments received: $*"
-    bash -c "PATH='/opt/poetry/bin:$PATH' cd /opt/variational-entropy-search && PATH='/opt/poetry/bin:$PATH' poetry run python3 -m ves.main $*"
+    bash -c "PATH='/opt/poetry/bin:$PATH' cd /opt/variational-entropy-search && PATH='/opt/poetry/bin:$PATH' poetry run $*"
