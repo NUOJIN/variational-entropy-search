@@ -28,7 +28,7 @@ Stage: build
     export POETRY_HOME=/opt/poetry
     curl -sSL https://install.python-poetry.org | python3.11 -
 
-    poetry install --no-root --only main
+    poetry install --no-root
 
     # clean up
     rm -rf /var/lib/apt/lists/*
