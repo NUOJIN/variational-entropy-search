@@ -10,6 +10,7 @@ from argparse import ArgumentParser
 from functools import partial
 from zlib import adler32
 
+import gpytorch
 import numpy as np
 import torch
 from botorch.acquisition import LogExpectedImprovement
@@ -188,13 +189,14 @@ if __name__ == "__main__":
         # Define an intial point for VES-Gamma
         X = torch.rand(1, 1, D, dtype=torch.double, device=device)
         if run_ei:
-            ei_candidate, acq_value = optimize_acqf(
-                ei_model,
-                bounds=bounds.T,
-                q=1,  # Number of candidates to optimize for
-                num_restarts=args.acqf_num_restarts,
-                raw_samples=args.acqf_raw_samples,
-            )
+            with gpytorch.settings.cholesky_max_tries(9):
+                ei_candidate, acq_value = optimize_acqf(
+                    ei_model,
+                    bounds=bounds.T,
+                    q=1,  # Number of candidates to optimize for
+                    num_restarts=args.acqf_num_restarts,
+                    raw_samples=args.acqf_raw_samples,
+                )
             train_x_ei = torch.cat([train_x_ei, ei_candidate], dim=0)
             f_ei = objective(ei_candidate)
             print(
@@ -223,13 +225,14 @@ if __name__ == "__main__":
             fit_mll_with_adam_backup(mll_ei)  # fit mll hyperpara
             ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
         elif run_mes:
-            mes_candidate, acq_value = optimize_acqf(
-                mes_model,
-                bounds=bounds.T,
-                q=1,  # Number of candidates to optimize for
-                num_restarts=args.acqf_num_restarts,
-                raw_samples=args.acqf_raw_samples,
-            )
+            with gpytorch.settings.cholesky_max_tries(9):
+                mes_candidate, acq_value = optimize_acqf(
+                    mes_model,
+                    bounds=bounds.T,
+                    q=1,  # Number of candidates to optimize for
+                    num_restarts=args.acqf_num_restarts,
+                    raw_samples=args.acqf_raw_samples,
+                )
             train_x_mes = torch.cat([train_x_mes, mes_candidate], dim=0)
             f_mes = objective(mes_candidate)
             print(
@@ -258,13 +261,14 @@ if __name__ == "__main__":
             fit_mll_with_adam_backup(mll_mes)
             mes_model = qMaxValueEntropy(gp_mes, candidate_set)
         elif run_vesseq:
-            vesseq_candidate, acq_value = optimize_acqf(
-                vesseq_model,
-                bounds=bounds.T,
-                q=1,  # Number of candidates to optimize for
-                num_restarts=args.acqf_num_restarts,
-                raw_samples=args.acqf_raw_samples,
-            )
+            with gpytorch.settings.cholesky_max_tries(9):
+                vesseq_candidate, acq_value = optimize_acqf(
+                    vesseq_model,
+                    bounds=bounds.T,
+                    q=1,  # Number of candidates to optimize for
+                    num_restarts=args.acqf_num_restarts,
+                    raw_samples=args.acqf_raw_samples,
+                )
             train_x_vesseq = torch.cat([train_x_vesseq, vesseq_candidate], dim=0)
             f_vesseq = objective(vesseq_candidate)
             print(
