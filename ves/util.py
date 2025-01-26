@@ -16,7 +16,9 @@ from botorch import fit_gpytorch_mll
 from botorch.exceptions import ModelFittingError
 from botorch.models import SingleTaskGP
 from botorch.models.transforms import Standardize
-from botorch.models.utils.gpytorch_modules import get_gaussian_likelihood_with_gamma_prior
+from botorch.models.utils.gpytorch_modules import (
+    get_gaussian_likelihood_with_gamma_prior,
+)
 from botorch.sampling.pathwise import MatheronPath, draw_matheron_paths
 from botorch.test_functions import Hartmann, Levy, Griewank, Branin, Ackley, Michalewicz
 from gpytorch import ExactMarginalLogLikelihood
@@ -28,54 +30,54 @@ from scipy.optimize import optimize
 from torch import Tensor, Size
 from torch.quasirandom import SobolEngine
 
-AVAILABLE_BENCHMARKS = ['ackley2',
-                        "lasso-dna",
-                        "lasso-high",
-                        "lasso-hard",
-                        "mopta08",
-                        "svm",
-                        "mujoco-ant",
-                        "mujoco-humanoid",
-                        "robotpushing",
-                        "lasso-breastcancer",
-                        "rover",
-                        "hartmann6",
-                        "branin2",
-                        "prior_sample_10d_ls0.5",
-                        "prior_sample_10d_ls1",
-                        "prior_sample_10d_ls2",
-                        "prior_sample_50d_ls0.5",
-                        "prior_sample_50d_ls1",
-                        "prior_sample_50d_ls2",
-                        "prior_sample_100d_ls0.5",
-                        "prior_sample_100d_ls1",
-                        "prior_sample_100d_ls2",
-                        "prior_sample_2d_ls0.5",
-                        "prior_sample_2d_ls1",
-                        "prior_sample_2d_ls2",
-                        "prior_sample_2d_ls0.1",
-                        "prior_sample_2d_ls0.05",
-                        "mujoco-halfcheetah",
-                        "mujoco-walker",
-                        "schwefel100",
-                        "schwefel10",
-                        "schwefel300",
-                        "schwefel500",
-                        'levy4',
-                        "levy100",
-                        "levy300",
-                        "levy500",
-                        'michalewicz10',
-                        'griewank8',
-                        'griewank8_small_space',
-                        "griewank100",
-                        "griewank300",
-                        "griewank500", ]
+AVAILABLE_BENCHMARKS = [
+    "ackley2",
+    "lasso-dna",
+    "lasso-high",
+    "lasso-hard",
+    "mopta08",
+    "svm",
+    "mujoco-ant",
+    "mujoco-humanoid",
+    "robotpushing",
+    "lasso-breastcancer",
+    "rover",
+    "hartmann6",
+    "branin2",
+    "prior_sample_10d_ls0.5",
+    "prior_sample_10d_ls1",
+    "prior_sample_10d_ls2",
+    "prior_sample_50d_ls0.5",
+    "prior_sample_50d_ls1",
+    "prior_sample_50d_ls2",
+    "prior_sample_100d_ls0.5",
+    "prior_sample_100d_ls1",
+    "prior_sample_100d_ls2",
+    "prior_sample_2d_ls0.5",
+    "prior_sample_2d_ls1",
+    "prior_sample_2d_ls2",
+    "prior_sample_2d_ls0.1",
+    "prior_sample_2d_ls0.05",
+    "mujoco-halfcheetah",
+    "mujoco-walker",
+    "schwefel100",
+    "schwefel10",
+    "schwefel300",
+    "schwefel500",
+    "levy4",
+    "levy100",
+    "levy300",
+    "levy500",
+    "michalewicz10",
+    "griewank8",
+    "griewank8_small_space",
+    "griewank100",
+    "griewank300",
+    "griewank500",
+]
 
 
-def str2bool(
-        string_value: str
-) -> bool:
+def str2bool(string_value: str) -> bool:
     """
     Convert string to boolean
 
@@ -86,18 +88,16 @@ def str2bool(
         boolean value
 
     """
-    if string_value.lower() in ['true', '1']:
+    if string_value.lower() in ["true", "1"]:
         return True
-    elif string_value.lower() in ['false', '0']:
+    elif string_value.lower() in ["false", "0"]:
         return False
     else:
         raise ValueError("Invalid boolean value")
 
 
 @contextmanager
-def torch_random_seed(
-        seed: int | None
-):
+def torch_random_seed(seed: int | None):
     """
     Sets the random seed for torch operations within the context.
 
@@ -117,7 +117,7 @@ def torch_random_seed(
 
 
 def fit_mll_with_adam_backup(
-        mll: ExactMarginalLogLikelihood,
+    mll: ExactMarginalLogLikelihood,
 ) -> None:
     """
     Fit the likelihood using BoTorch's fit_mll but use Adam if the original optimization fails.
@@ -134,7 +134,9 @@ def fit_mll_with_adam_backup(
             fit_gpytorch_mll(mll)
         except (NotPSDError, ModelFittingError) as e:
             try:
-                warnings.warn(f"Error fitting MLL with L-BFGS: {e}. Running Adam-based optimization...")
+                warnings.warn(
+                    f"Error fitting MLL with L-BFGS: {e}. Running Adam-based optimization..."
+                )
                 optimizer = torch.optim.Adam(mll.parameters(), lr=0.1)
                 mll.train()
                 model = mll.model
@@ -146,17 +148,19 @@ def fit_mll_with_adam_backup(
                     optimizer.step()
                 mll.eval()
             except (NotPSDError, ModelFittingError):
-                warnings.warn("Adam optimizer failed to converge. Skipping model fitting.")
+                warnings.warn(
+                    "Adam optimizer failed to converge. Skipping model fitting."
+                )
                 mll.eval()
 
 
 def get_gp(
-        train_x: Tensor,
-        train_y: Tensor,
-        gp_lengthscale: Optional[float] = None,
-        gp_noise: Optional[float] = None,
-        gp_outputscale: Optional[float] = None,
-        lengthscale_prior: Optional[str] = None,
+    train_x: Tensor,
+    train_y: Tensor,
+    gp_lengthscale: Optional[float] = None,
+    gp_noise: Optional[float] = None,
+    gp_outputscale: Optional[float] = None,
+    lengthscale_prior: Optional[str] = None,
 ) -> SingleTaskGP:
     """
     Get a GP model with a Matern kernel and Gamma prior on the lengthscale.
@@ -187,7 +191,9 @@ def get_gp(
         scale = torch.tensor(math.sqrt(3.0)).to(train_x)
         _lengthscale_prior = LogNormalPrior(loc, scale)
 
-    covar_module = ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=_lengthscale_prior))
+    covar_module = ScaleKernel(
+        MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=_lengthscale_prior)
+    )
     if gp_lengthscale is not None:
         covar_module.base_kernel.lengthscale = gp_lengthscale
         covar_module.base_kernel.raw_lengthscale.requires_grad = False
@@ -207,15 +213,15 @@ def get_gp(
         train_y,
         outcome_transform=outcome_transform,
         covar_module=covar_module,
-        likelihood=likelihood
+        likelihood=likelihood,
     )
     return gp
 
 
 def robust_draw_matheron_paths(
-        model: GP,
-        sample_shape: Size,
-        **kwargs: Any,
+    model: GP,
+    sample_shape: Size,
+    **kwargs: Any,
 ) -> MatheronPath:
     """
     Wrapper around draw_matheron_paths that sets the number of Cholesky decomposition tries to 9.
@@ -232,12 +238,7 @@ def robust_draw_matheron_paths(
         return draw_matheron_paths(model, sample_shape, **kwargs)
 
 
-def find_root_log_minus_digamma(
-        intercept,
-        tol=1e-5,
-        lower_bound=1e-8,
-        upper_bound=1e8
-):
+def find_root_log_minus_digamma(intercept, tol=1e-5, lower_bound=1e-8, upper_bound=1e8):
     """
     Find a root of the function log(x) - digamma(x) - intercept using a combination of
     the bisection method and Newton's method.
@@ -251,21 +252,15 @@ def find_root_log_minus_digamma(
     float or tensor: Approximate root of the function.
     """
 
-    def f(
-            x
-    ):
+    def f(x):
         return math.log(x) - scipy.special.digamma(x) - intercept
 
-    def f_least_square(
-            x
-    ):
+    def f_least_square(x):
         return f(x) ** 2
 
     try:
         root_finding_result = optimize.minimize_scalar(
-            f_least_square,
-            bounds=(lower_bound, upper_bound),
-            options={'xatol': tol}
+            f_least_square, bounds=(lower_bound, upper_bound), options={"xatol": tol}
         ).x
     except:
         root_finding_result = 1.0
@@ -274,13 +269,13 @@ def find_root_log_minus_digamma(
 
 
 def optimize_posterior_samples(
-        paths,
-        bounds: Tensor,
-        raw_samples: Optional[int] = 2048,
-        num_restarts: Optional[int] = 10,
-        maxiter: int = 100,
-        lr: float = 2.5e-4,
-        device: torch.device = torch.device("cpu"),
+    paths,
+    bounds: Tensor,
+    raw_samples: Optional[int] = 2048,
+    num_restarts: Optional[int] = 10,
+    maxiter: int = 100,
+    lr: float = 2.5e-4,
+    device: torch.device = torch.device("cpu"),
 ) -> Tuple[Tensor, Tensor]:
     r"""Cheaply optimizes posterior samples by random querying followed by vanilla
     gradient descent on the best num_restarts points.
@@ -298,9 +293,11 @@ def optimize_posterior_samples(
     Returns:Optional
         Tuple[Tensor, Tensor]: The optimal input-output pair(s) (X^*. f^*)
     """
-    candidate_set = SobolEngine(
-        dimension=bounds.shape[0], scramble=True
-    ).draw(raw_samples).to(device=device)
+    candidate_set = (
+        SobolEngine(dimension=bounds.shape[0], scramble=True)
+        .draw(raw_samples)
+        .to(device=device)
+    )
     # TODO add spray points
     # queries all samples on all candidates - output raw_samples * num_objectives * num_optima
     candidate_queries = paths.forward(candidate_set)
@@ -313,11 +310,15 @@ def optimize_posterior_samples(
     for i in range(maxiter):
         per_sample_outputs = paths.forward(X_argtop)
         grads = torch.autograd.grad(
-            per_sample_outputs, X_argtop, grad_outputs=torch.ones_like(per_sample_outputs)
+            per_sample_outputs,
+            X_argtop,
+            grad_outputs=torch.ones_like(per_sample_outputs),
         )[0]
         X_argtop = torch.clamp(X_argtop + lr * grads, 0, 1)  # TODO fix bounds here
 
-    per_sample_outputs = paths.forward(X_argtop).reshape(num_optima * batch_size, num_restarts)
+    per_sample_outputs = paths.forward(X_argtop).reshape(
+        num_optima * batch_size, num_restarts
+    )
     f_max = per_sample_outputs.max(axis=-1).values.reshape(num_optima, batch_size, 1)
 
     return f_max.detach()
@@ -330,8 +331,8 @@ class BenchmarkType(Enum):
 
 
 def get_objective(
-        benchmark_name: str,
-        device: torch.device,
+    benchmark_name: str,
+    device: torch.device,
 ) -> Tuple[Callable[[Tensor], Tensor], int]:
     """
 
@@ -345,7 +346,7 @@ def get_objective(
     """
 
     match benchmark_name:
-        case 'ackley2':
+        case "ackley2":
             benchmark_dim = 2
             benchmark_type = BenchmarkType.BOTORCH
         case "lasso-dna":
@@ -384,63 +385,63 @@ def get_objective(
         case "rover":
             benchmark_dim = 60
             benchmark_type = BenchmarkType.BENCHER
-        case 'hartmann6':
+        case "hartmann6":
             benchmark_dim = 6
             benchmark_type = BenchmarkType.BOTORCH
-        case 'branin2':
+        case "branin2":
             benchmark_dim = 2
             benchmark_type = BenchmarkType.BOTORCH
-        case 'levy4':
+        case "levy4":
             benchmark_dim = 4
             benchmark_type = BenchmarkType.BOTORCH
-        case 'levy100':
+        case "levy100":
             benchmark_dim = 100
             benchmark_type = BenchmarkType.BOTORCH
-        case 'levy300':
+        case "levy300":
             benchmark_dim = 300
             benchmark_type = BenchmarkType.BOTORCH
-        case 'levy500':
+        case "levy500":
             benchmark_dim = 500
             benchmark_type = BenchmarkType.BOTORCH
-        case 'michalewicz10':
+        case "michalewicz10":
             benchmark_dim = 10
             benchmark_type = BenchmarkType.BOTORCH
-        case 'griewank8':
+        case "griewank8":
             benchmark_dim = 8
             benchmark_type = BenchmarkType.BOTORCH
-        case 'griewank8_small_space':
+        case "griewank8_small_space":
             benchmark_dim = 8
             benchmark_type = BenchmarkType.BOTORCH
-        case 'griewank100':
+        case "griewank100":
             benchmark_dim = 100
             benchmark_type = BenchmarkType.BOTORCH
-        case 'griewank300':
+        case "griewank300":
             benchmark_dim = 300
             benchmark_type = BenchmarkType.BOTORCH
-        case 'griewank500':
+        case "griewank500":
             benchmark_dim = 500
             benchmark_type = BenchmarkType.BOTORCH
-        case 'schwefel10':
+        case "schwefel10":
             benchmark_dim = 10
             benchmark_type = BenchmarkType.BOTORCH
-        case 'schwefel100':
+        case "schwefel100":
             benchmark_dim = 100
             benchmark_type = BenchmarkType.BOTORCH
-        case 'schwefel300':
+        case "schwefel300":
             benchmark_dim = 300
             benchmark_type = BenchmarkType.BOTORCH
-        case 'schwefel500':
+        case "schwefel500":
             benchmark_dim = 500
             benchmark_type = BenchmarkType.BOTORCH
-        case s if s.startswith('prior_sample_'):
-            benchmark_dim = int(s.split('_')[2][:-1])
-            sample_ls = float(s.split('_')[-1][2:])
+        case s if s.startswith("prior_sample_"):
+            benchmark_dim = int(s.split("_")[2][:-1])
+            sample_ls = float(s.split("_")[-1][2:])
             benchmark_type = BenchmarkType.GP_PRIOR_SAMPLE
         case _:
             raise ValueError("Invalid benchmark")
 
     def objective(
-            x: Tensor,
+        x: Tensor,
     ) -> Tensor:
         """
         The objective function
@@ -453,76 +454,93 @@ def get_objective(
 
         """
         if benchmark_type == BenchmarkType.BOTORCH:
-            if benchmark_name == 'hartmann6':
+            if benchmark_name == "hartmann6":
                 _f = Hartmann(negate=True)
                 return _f(x)
-            elif benchmark_name.startswith('ackley'):
+            elif benchmark_name.startswith("ackley"):
                 # name is something like ackley2
                 dim = int(benchmark_name[6:])
-                ackley_bounds = torch.tensor([[-32.768, 32.768]] * dim, dtype=torch.double, device=device).T
+                ackley_bounds = torch.tensor(
+                    [[-32.768, 32.768]] * dim, dtype=torch.double, device=device
+                ).T
                 x_eval = x * (ackley_bounds[1] - ackley_bounds[0]) + ackley_bounds[0]
 
                 _f = Ackley(negate=True, dim=dim)
                 return _f(x_eval)
-            elif benchmark_name.startswith('levy'):
+            elif benchmark_name.startswith("levy"):
                 # name is something like levy300
                 dim = int(benchmark_name[4:])
-                levy_bounds = torch.tensor([[-10, 10]] * dim, dtype=torch.double, device=device).T
+                levy_bounds = torch.tensor(
+                    [[-10, 10]] * dim, dtype=torch.double, device=device
+                ).T
                 x_eval = x * (levy_bounds[1] - levy_bounds[0]) + levy_bounds[0]
 
                 _f = Levy(negate=True, dim=dim)
                 return _f(x_eval)
-            elif benchmark_name.startswith('michalewicz'):
+            elif benchmark_name.startswith("michalewicz"):
                 # name is something like michalewicz10
                 dim = int(benchmark_name[11:])
-                michalewicz_bounds = torch.tensor([[0, math.pi]] * dim, dtype=torch.double, device=device).T
-                x_eval = x * (michalewicz_bounds[1] - michalewicz_bounds[0]) + michalewicz_bounds[0]
+                michalewicz_bounds = torch.tensor(
+                    [[0, math.pi]] * dim, dtype=torch.double, device=device
+                ).T
+                x_eval = (
+                    x * (michalewicz_bounds[1] - michalewicz_bounds[0])
+                    + michalewicz_bounds[0]
+                )
 
                 _f = Michalewicz(negate=True, dim=dim)
                 return _f(x_eval)
-            elif benchmark_name.startswith('griewank'):
+            elif benchmark_name.startswith("griewank"):
                 # name is something like griewank300
-                dim = int(benchmark_name[8:].split('_')[0])
-                if not benchmark_name.endswith('small_space'):
-                    griewank_bounds = torch.tensor([[-600, 600]] * dim, dtype=torch.double, device=device).T
+                dim = int(benchmark_name[8:].split("_")[0])
+                if not benchmark_name.endswith("small_space"):
+                    griewank_bounds = torch.tensor(
+                        [[-600, 600]] * dim, dtype=torch.double, device=device
+                    ).T
                 else:
-                    griewank_bounds = torch.tensor([[-10, 10]] * dim, dtype=torch.double, device=device).T
-                x_eval = x * (griewank_bounds[1] - griewank_bounds[0]) + griewank_bounds[0]
+                    griewank_bounds = torch.tensor(
+                        [[-10, 10]] * dim, dtype=torch.double, device=device
+                    ).T
+                x_eval = (
+                    x * (griewank_bounds[1] - griewank_bounds[0]) + griewank_bounds[0]
+                )
 
                 _f = Griewank(negate=True, dim=dim)
                 return _f(x_eval)
-            elif benchmark_name.startswith('schwefel'):
+            elif benchmark_name.startswith("schwefel"):
                 # name is something like schwefel300
                 dim = int(benchmark_name[8:])
-                schwefel_bounds = torch.tensor([[-500, 500]] * dim, dtype=torch.double, device=device).T
-                x_eval = x * (schwefel_bounds[1] - schwefel_bounds[0]) + schwefel_bounds[0]
+                schwefel_bounds = torch.tensor(
+                    [[-500, 500]] * dim, dtype=torch.double, device=device
+                ).T
+                x_eval = (
+                    x * (schwefel_bounds[1] - schwefel_bounds[0]) + schwefel_bounds[0]
+                )
 
-                def schwefel(
-                        x: Tensor,
-                        dim: int,
-                        negate: bool
-                ) -> Tensor:
-                    res = 418.9829 * dim - torch.sum(x * torch.sin(torch.sqrt(torch.abs(x))))
+                def schwefel(x: Tensor, dim: int, negate: bool) -> Tensor:
+                    res = 418.9829 * dim - torch.sum(
+                        x * torch.sin(torch.sqrt(torch.abs(x)))
+                    )
                     return -res if negate else res
 
                 return schwefel(x_eval, dim, True)
 
-            elif benchmark_name == 'branin2':
+            elif benchmark_name == "branin2":
 
-                branin_bounds = torch.tensor([[-5, 10], [0, 15]], dtype=torch.double, device=device).T
+                branin_bounds = torch.tensor(
+                    [[-5, 10], [0, 15]], dtype=torch.double, device=device
+                ).T
                 x_eval = x * (branin_bounds[1] - branin_bounds[0]) + branin_bounds[0]
 
                 _f = Branin(negate=True)
                 return _f(x_eval)
 
         elif benchmark_type == BenchmarkType.BENCHER:
-            stub = BencherStub(
-                grpc.insecure_channel(f"localhost:50051")
-            )
-            assert x.ndim in [1, 2], 'x must be 1D or 2D'
+            stub = BencherStub(grpc.insecure_channel(f"localhost:50051"))
+            assert x.ndim in [1, 2], "x must be 1D or 2D"
             _x = x
             if x.ndim == 2:
-                assert x.shape[0] == 1, 'x has to be essentially 1D'
+                assert x.shape[0] == 1, "x has to be essentially 1D"
                 _x = x.squeeze(0)
             # add timeout to evaluation
             n_retries = 0
@@ -531,16 +549,13 @@ def get_objective(
                 try:
                     res = stub.evaluate_point(
                         BenchmarkRequest(
-                            benchmark=benchmark_name,
-                            point={
-                                'values': _x.tolist()
-                            }
+                            benchmark=benchmark_name, point={"values": _x.tolist()}
                         ),
                     )
                     failed = False
                     break
                 except Exception as e:
-                    print(f'error: {e}')
+                    print(f"error: {e}")
                     n_retries += 1
                     if n_retries == 10 and failed:
                         raise e
@@ -573,11 +588,7 @@ def get_objective(
     return objective, benchmark_dim
 
 
-def init_samples(
-        n_init: int,
-        dim: int,
-        seed: int | None
-) -> Tensor:
+def init_samples(n_init: int, dim: int, seed: int | None) -> Tensor:
     """
     Initialize samples using Sobol sequence
 

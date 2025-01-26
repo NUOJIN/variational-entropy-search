@@ -18,6 +18,7 @@ scipy = "^1.15.1"
 
 [tool.poetry.group.dev.dependencies]
 memray = "^1.15.0"
+black = "^24.10.0"
 
 [build-system]
 requires = ["poetry-core"]

@@ -12,15 +12,15 @@ from ves.util import optimize_posterior_samples, robust_draw_matheron_paths
 class VariationalEntropySearchGammaSeqK(MCAcquisitionFunction):
 
     def __init__(
-            self,
-            model: Model,
-            best_f: Union[float, torch.Tensor],
-            num_paths: int,
-            clamp_min: float,
-            k: Union[float, torch.Tensor],
-            bounds: torch.Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
-            device: torch.device = torch.device("cpu"),
-            **kwargs: Any,
+        self,
+        model: Model,
+        best_f: Union[float, torch.Tensor],
+        num_paths: int,
+        clamp_min: float,
+        k: Union[float, torch.Tensor],
+        bounds: torch.Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
+        device: torch.device = torch.device("cpu"),
+        **kwargs: Any,
     ):
         """
         The VES(-Gamma) class should be initialized with following args
@@ -39,18 +39,16 @@ class VariationalEntropySearchGammaSeqK(MCAcquisitionFunction):
         self.best_f = best_f
         self.paths = robust_draw_matheron_paths(self.model, torch.Size([num_paths]))
         self.optimal_outputs = optimize_posterior_samples(
-            self.paths,
-            bounds,
-            device=device
+            self.paths, bounds, device=device
         )
         self.k = k
         self.bounds = bounds
         self.clamp_min = clamp_min
 
     def forward(
-            self,
-            x: torch.Tensor,
-            **kwargs: Any,
+        self,
+        x: torch.Tensor,
+        **kwargs: Any,
     ):
         """
         This VES class implements VES-Gamma, a special case of VES.
@@ -77,7 +75,7 @@ class VariationalEntropySearchGammaSeqK(MCAcquisitionFunction):
             self.paths,
             self.optimal_outputs,
             self.k,
-            1.0, # Enforce beta value to be 1.0
-            self.clamp_min
+            1.0,  # Enforce beta value to be 1.0
+            self.clamp_min,
         )
         return halfVES(cur_X)

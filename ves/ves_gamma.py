@@ -10,22 +10,26 @@ from botorch.optim import optimize_acqf
 from botorch.sampling.pathwise import MatheronPath
 
 from ves.half_ves import HalfVES
-from ves.util import optimize_posterior_samples, robust_draw_matheron_paths, find_root_log_minus_digamma
+from ves.util import (
+    optimize_posterior_samples,
+    robust_draw_matheron_paths,
+    find_root_log_minus_digamma,
+)
 
 
 class VariationalEntropySearchGamma(MCAcquisitionFunction):
 
     def __init__(
-            self,
-            model: Model,
-            best_f: Union[float, torch.Tensor],
-            paths: MatheronPath,
-            clamp_min: float,
-            optimize_acqf_options: dict[str, Any] | None = None,
-            bounds: torch.Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
-            stop_tolerance_coeff: float = 1e-5,
-            device: torch.device = torch.device("cpu"),
-            **kwargs: Any,
+        self,
+        model: Model,
+        best_f: Union[float, torch.Tensor],
+        paths: MatheronPath,
+        clamp_min: float,
+        optimize_acqf_options: dict[str, Any] | None = None,
+        bounds: torch.Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
+        stop_tolerance_coeff: float = 1e-5,
+        device: torch.device = torch.device("cpu"),
+        **kwargs: Any,
     ):
         """
         The VES(-Gamma) class should be initialized with following args
@@ -42,11 +46,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         super().__init__(model=model)
         self.sampling_model = deepcopy(model)
         self.best_f = best_f
-        self.optimal_outputs = optimize_posterior_samples(
-            paths,
-            bounds,
-            device=device
-        )
+        self.optimal_outputs = optimize_posterior_samples(paths, bounds, device=device)
         self.paths = paths
         self.bounds = bounds
         self.clamp_min = clamp_min
@@ -54,18 +54,18 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         if optimize_acqf_options is None:
             optimize_acqf_options = {
                 "num_restarts": 5,
-                "raw_samples" : 1024,
-                "options"     : {"sample_around_best": True}
+                "raw_samples": 1024,
+                "options": {"sample_around_best": True},
             }
         self.optimize_acqf_options = optimize_acqf_options
 
     def forward(
-            self,
-            x: torch.Tensor,
-            num_paths: int,
-            num_iter: int = 64,
-            show_progress: bool = True,
-            **kwargs: Any,
+        self,
+        x: torch.Tensor,
+        num_paths: int,
+        num_iter: int = 64,
+        show_progress: bool = True,
+        **kwargs: Any,
     ):
         """
         This VES class implements VES-Gamma, a special case of VES.
@@ -99,7 +99,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 self.optimal_outputs,
                 kval.item(),
                 betaval.item(),
-                self.clamp_min
+                self.clamp_min,
             )
             # Step 2: Given k and beta, find optimal X
             with gpytorch.settings.cholesky_max_tries(9):
@@ -107,9 +107,11 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                     halfVES,
                     bounds=self.bounds.T,
                     q=1,  # Number of candidates to optimize for
-                    **self.optimize_acqf_options
+                    **self.optimize_acqf_options,
                 )
-            if torch.norm(new_x - cur_X) < self.stop_tolerance_coeff * self.bounds.size(0):
+            if torch.norm(new_x - cur_X) < self.stop_tolerance_coeff * self.bounds.size(
+                0
+            ):
                 break
             cur_X = new_x
             self.paths = robust_draw_matheron_paths(self.model, torch.Size([num_paths]))
@@ -119,13 +121,12 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 device=device,
             )
             if show_progress and i % 5 == 0:
-                print(f"Iteration {i}: K: {kval.item():.3e}; beta {betaval.item():.3e}; AF value: {acq_value:.3e}")
+                print(
+                    f"Iteration {i}: K: {kval.item():.3e}; beta {betaval.item():.3e}; AF value: {acq_value:.3e}"
+                )
         return cur_X, acq_value, kval.item(), betaval.item()
 
-    def generate_max_value_term(
-            self,
-            x: torch.Tensor
-    ):
+    def generate_max_value_term(self, x: torch.Tensor):
         """
         This function generate values of y^* - max(y_x, y^*_t) given
         position X and paths.
@@ -137,14 +138,13 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         """
         posterior_samples = self.paths(x.squeeze(1))
         improvement_term = torch.max(posterior_samples, self.best_f)
-        max_value_term = (self.optimal_outputs.squeeze(1) - improvement_term).clamp_min(self.clamp_min)
+        max_value_term = (self.optimal_outputs.squeeze(1) - improvement_term).clamp_min(
+            self.clamp_min
+        )
         # This should be able to be logged, since it is per-sample
         return max_value_term
 
-    def find_k(
-            self,
-            max_value_term: torch.Tensor
-    ):
+    def find_k(self, max_value_term: torch.Tensor):
         """
         This function evaluates the optimal values of k and beta
         Args:
@@ -160,10 +160,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         beta_vals = k_vals / A
         return k_vals, beta_vals
 
-    def root_finding(
-            self,
-            x: torch.Tensor
-    ):
+    def root_finding(self, x: torch.Tensor):
         """
         Root finding function to solve Eq 3.9; Non-differentiable(?)
         """

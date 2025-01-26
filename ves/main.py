@@ -24,7 +24,9 @@ from ves.util import (
     get_gp,
     fit_mll_with_adam_backup,
     robust_draw_matheron_paths,
-    get_objective, AVAILABLE_BENCHMARKS, init_samples,
+    get_objective,
+    AVAILABLE_BENCHMARKS,
+    init_samples,
 )
 from ves.ves_exponential import VariationalEntropySearchExponential
 from ves.ves_gamma import VariationalEntropySearchGamma
@@ -34,8 +36,12 @@ if __name__ == "__main__":
     # Test VES on a trivial example (D=5)
 
     argparse = ArgumentParser()
-    argparse.add_argument("--num_paths", type=int, default=64, help="Number of paths to sample")
-    argparse.add_argument("--num_iter", type=int, default=50, help="Number of iterations for VES")
+    argparse.add_argument(
+        "--num_paths", type=int, default=64, help="Number of paths to sample"
+    )
+    argparse.add_argument(
+        "--num_iter", type=int, default=50, help="Number of iterations for VES"
+    )
     argparse.add_argument("--num_bo_iter", type=int, default=500)
     argparse.add_argument("--n_init", type=int, default=20)
     argparse.add_argument("--k_init", type=float, default=None)
@@ -47,14 +53,22 @@ if __name__ == "__main__":
     argparse.add_argument("--run_logei", type=str2bool, default=False)
     argparse.add_argument("--run_mes", type=str2bool, default=False)
     argparse.add_argument("--run_vesseq", type=str2bool, default=False)
-    argparse.add_argument("--decay_target", type=int, default=None,
-                          help="The number of iterations to reach the final k (num_bo_iter if None)")
-    argparse.add_argument("--k_target", type=float, default=0.5, help="The final k value")
+    argparse.add_argument(
+        "--decay_target",
+        type=int,
+        default=None,
+        help="The number of iterations to reach the final k (num_bo_iter if None)",
+    )
+    argparse.add_argument(
+        "--k_target", type=float, default=0.5, help="The final k value"
+    )
     argparse.add_argument("--exponential_family", type=str2bool, default=False)
     argparse.add_argument("--set_lengthscale", type=float, default=None)
     argparse.add_argument("--set_noise", type=float, default=None)
     argparse.add_argument("--set_outputscale", type=float, default=None)
-    argparse.add_argument("--lengthscale_prior", choices=["bounce", "vbo"], default="bounce")
+    argparse.add_argument(
+        "--lengthscale_prior", choices=["bounce", "vbo"], default="bounce"
+    )
     argparse.add_argument("--stop_tolerance_coeff", type=float, default=1e-5)
     argparse.add_argument("--device", type=str, default="cuda", choices=["cpu", "cuda"])
 
@@ -77,12 +91,15 @@ if __name__ == "__main__":
     gp_outputscale = args.set_outputscale
     lengthscale_prior = args.lengthscale_prior
     stop_tolerance_coeff = args.stop_tolerance_coeff
-    device = torch.device(args.device) if torch.cuda.is_available() else torch.device("cpu")
+    device = (
+        torch.device(args.device) if torch.cuda.is_available() else torch.device("cpu")
+    )
     print(f"Device: {device}")
 
     # check that at most one of run_ei, run_log_ei, run_mes, run_vesseq is True
-    assert sum([run_ei, run_log_ei, run_mes,
-                run_vesseq]) <= 1, "At most one of run_ei, run_log_ei, run_mes, run_vesseq can be True"
+    assert (
+        sum([run_ei, run_log_ei, run_mes, run_vesseq]) <= 1
+    ), "At most one of run_ei, run_log_ei, run_mes, run_vesseq can be True"
 
     # Define the objective function
     objective, D = get_objective(benchmark_name=args.benchmark, device=device)
@@ -97,7 +114,7 @@ if __name__ == "__main__":
     run_dir = f"{adler32(json.dumps(args_dir).encode())}"
     timestamp_ms = int(time.time_ns() / 1e6)
     run_dir = f"{timestamp_ms}_{run_dir}"
-    if 'SLURM_ARRAY_TASK_ID' in os.environ:
+    if "SLURM_ARRAY_TASK_ID" in os.environ:
         run_dir = f'{run_dir}_{os.environ["SLURM_ARRAY_TASK_ID"]}'
 
     os.makedirs(f"runs/{run_dir}", exist_ok=True)
@@ -113,14 +130,19 @@ if __name__ == "__main__":
     acqf_options = {
         "num_restarts": args.acqf_num_restarts,
         "raw_samples": args.acqf_raw_samples,
-        "options": {"sample_around_best": args.sample_around_best}
+        "options": {"sample_around_best": args.sample_around_best},
     }
 
     n_init = args.n_init
     # train_x_ves = torch.rand(n_init, D, dtype=torch.double, device=device)
-    train_x_ves = init_samples(n_init=n_init, dim=D, seed=os.environ.get("SLURM_ARRAY_TASK_ID", None)).to(
-        dtype=torch.double, device=device)
-    train_y_ves = torch.Tensor([objective(x) for x in train_x_ves]).unsqueeze(1).to(dtype=torch.double, device=device)
+    train_x_ves = init_samples(
+        n_init=n_init, dim=D, seed=os.environ.get("SLURM_ARRAY_TASK_ID", None)
+    ).to(dtype=torch.double, device=device)
+    train_y_ves = (
+        torch.Tensor([objective(x) for x in train_x_ves])
+        .unsqueeze(1)
+        .to(dtype=torch.double, device=device)
+    )
 
     if run_ei or run_log_ei:
         train_x_ei = train_x_ves.clone()
@@ -154,11 +176,17 @@ if __name__ == "__main__":
         gp_mes = _get_gp(train_x_mes, train_y_mes)
         mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)  # mll object
         fit_mll_with_adam_backup(mll_mes)  # fit mll hyperparameters
-        candidate_set = SobolEngine(dimension=bounds.shape[0], scramble=True).draw(2048).to(device=device)
+        candidate_set = (
+            SobolEngine(dimension=bounds.shape[0], scramble=True)
+            .draw(2048)
+            .to(device=device)
+        )
         mes_model = qMaxValueEntropy(gp_mes, candidate_set)
     elif run_vesseq:
         gp_vesseq = _get_gp(train_x_vesseq, train_y_vesseq)
-        mll_vesseq = ExactMarginalLogLikelihood(gp_vesseq.likelihood, gp_vesseq)  # mll object
+        mll_vesseq = ExactMarginalLogLikelihood(
+            gp_vesseq.likelihood, gp_vesseq
+        )  # mll object
         fit_mll_with_adam_backup(mll_vesseq)  # fit mll hyperparameters
         vesseq_model = VariationalEntropySearchGammaSeqK(
             gp_vesseq,
@@ -246,8 +274,12 @@ if __name__ == "__main__":
             )
             train_y_mes = torch.cat([train_y_mes, f_mes.reshape(1, 1)], dim=0)
             # save the results
-            np.save(f"runs/{run_dir}/train_x_mes.npy", train_x_mes.detach().cpu().numpy())
-            np.save(f"runs/{run_dir}/train_y_mes.npy", train_y_mes.detach().cpu().numpy())
+            np.save(
+                f"runs/{run_dir}/train_x_mes.npy", train_x_mes.detach().cpu().numpy()
+            )
+            np.save(
+                f"runs/{run_dir}/train_y_mes.npy", train_y_mes.detach().cpu().numpy()
+            )
 
             # get gp hyperparameters as dictionary
             gp_dict = gp_mes.state_dict()
@@ -282,8 +314,14 @@ if __name__ == "__main__":
             )
             train_y_vesseq = torch.cat([train_y_vesseq, f_vesseq.reshape(1, 1)], dim=0)
             # save the results
-            np.save(f"runs/{run_dir}/train_x_vesseq.npy", train_x_vesseq.detach().cpu().numpy())
-            np.save(f"runs/{run_dir}/train_y_vesseq.npy", train_y_vesseq.detach().cpu().numpy())
+            np.save(
+                f"runs/{run_dir}/train_x_vesseq.npy",
+                train_x_vesseq.detach().cpu().numpy(),
+            )
+            np.save(
+                f"runs/{run_dir}/train_y_vesseq.npy",
+                train_y_vesseq.detach().cpu().numpy(),
+            )
 
             # get gp hyperparameters as dictionary
             gp_dict = gp_vesseq.state_dict()
@@ -294,7 +332,9 @@ if __name__ == "__main__":
                 gp_dict_file = io.BytesIO()
                 torch.save(gp_dict, gp_dict_file)
                 gp_dict_file.seek(0)
-                tarinfo = tarfile.TarInfo(f"gp_hyperparameters_vesseq_iter{bo_iter}.pth")
+                tarinfo = tarfile.TarInfo(
+                    f"gp_hyperparameters_vesseq_iter{bo_iter}.pth"
+                )
                 tarinfo.size = len(gp_dict_file.getbuffer())
                 tar.addfile(tarinfo, gp_dict_file)
 
@@ -303,7 +343,9 @@ if __name__ == "__main__":
             fit_mll_with_adam_backup(mll_vesseq)
             k_target = args.k_target
             k_plus = init_k - k_target
-            decay_target = args.decay_target if args.decay_target is not None else args.num_bo_iter
+            decay_target = (
+                args.decay_target if args.decay_target is not None else args.num_bo_iter
+            )
             # set up the decay rate so that the final k is 1.05
             decay_rate = (math.log(k_plus) - math.log(0.05)) / decay_target
             k_next = (init_k - k_target) * math.exp(-decay_rate * bo_iter) + k_target
@@ -316,19 +358,27 @@ if __name__ == "__main__":
                 # k=init_k / np.log(2 + bo_iter),
                 k=k_next,
                 bounds=bounds,
-                device=device
+                device=device,
             )
         else:
-            ves_candidate, v, k_val, beta_val = ves_model(X, num_paths=num_paths, num_iter=args.num_iter)
+            ves_candidate, v, k_val, beta_val = ves_model(
+                X, num_paths=num_paths, num_iter=args.num_iter
+            )
             k_vals.append(k_val)
             beta_vals.append(beta_val)
             train_x_ves = torch.cat([train_x_ves, ves_candidate], dim=0)
             f_ves = objective(ves_candidate)
-            print(f"VES: cand={ves_candidate}, acq_val={v:.3e}, f_val={f_ves.item():.3e}, f_max={train_y_ves.max()}")
+            print(
+                f"VES: cand={ves_candidate}, acq_val={v:.3e}, f_val={f_ves.item():.3e}, f_max={train_y_ves.max()}"
+            )
             train_y_ves = torch.cat([train_y_ves, f_ves.reshape(1, 1)], dim=0)
             # save the results
-            np.save(f"runs/{run_dir}/train_x_ves.npy", train_x_ves.detach().cpu().numpy())
-            np.save(f"runs/{run_dir}/train_y_ves.npy", train_y_ves.detach().cpu().numpy())
+            np.save(
+                f"runs/{run_dir}/train_x_ves.npy", train_x_ves.detach().cpu().numpy()
+            )
+            np.save(
+                f"runs/{run_dir}/train_y_ves.npy", train_y_ves.detach().cpu().numpy()
+            )
 
             # save k_vals and beta_vals
             np.save(f"runs/{run_dir}/k_vals.npy", np.array(k_vals))
@@ -349,7 +399,9 @@ if __name__ == "__main__":
 
             gp_ves = _get_gp(train_x_ves, train_y_ves)
 
-            mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
+            mll_ves = ExactMarginalLogLikelihood(
+                gp_ves.likelihood, gp_ves
+            )  # mll object
             fit_mll_with_adam_backup(mll_ves)  # fit mll hyperpara
 
             paths = robust_draw_matheron_paths(gp_ves, torch.Size([num_paths]))

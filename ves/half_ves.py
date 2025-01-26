@@ -7,14 +7,14 @@ from botorch.models.model import Model
 
 class HalfVES(MCAcquisitionFunction):
     def __init__(
-            self,
-            model: Model,
-            best_f: Union[float, torch.Tensor],
-            paths,
-            optimal_outputs: torch.Tensor,
-            k: Union[float, torch.Tensor],
-            beta: Union[float, torch.Tensor],
-            clamp_min: float = 1e-10
+        self,
+        model: Model,
+        best_f: Union[float, torch.Tensor],
+        paths,
+        optimal_outputs: torch.Tensor,
+        k: Union[float, torch.Tensor],
+        beta: Union[float, torch.Tensor],
+        clamp_min: float = 1e-10,
     ):
         """
         HalfVESGamma is initialized with following args
@@ -40,10 +40,7 @@ class HalfVES(MCAcquisitionFunction):
         self.optimal_outputs = optimal_outputs
         self.clamp_min = clamp_min
 
-    def forward(
-            self,
-            x: torch.Tensor
-    ):
+    def forward(self, x: torch.Tensor):
         """
         The forward function evaluates ESLB for fixed k and beta
         Follow Eq 3.8
@@ -55,7 +52,9 @@ class HalfVES(MCAcquisitionFunction):
         posterior_samples = self.paths(x.squeeze(1))
         improvement_term = torch.max(posterior_samples, self.best_f).unsqueeze(1)
         # This should be able to be logged, since it is per-sample
-        max_value_term = (self.optimal_outputs - improvement_term).clamp_min(self.clamp_min)
+        max_value_term = (self.optimal_outputs - improvement_term).clamp_min(
+            self.clamp_min
+        )
         log_max_value = max_value_term.log()
         improvement_mean = improvement_term.mean(0)
         log_max_mean = log_max_value.mean(0)

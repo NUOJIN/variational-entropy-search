@@ -14,15 +14,15 @@ from ves.util import optimize_posterior_samples
 class VariationalEntropySearchExponential(MCAcquisitionFunction):
 
     def __init__(
-            self,
-            model: Model,
-            best_f: Union[float, torch.Tensor],
-            paths,
-            clamp_min: float,
-            optimize_acqf_options: dict[str, Any] | None = None,
-            bounds: torch.Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
-            device: torch.device = torch.device("cpu"),
-            **kwargs: Any,
+        self,
+        model: Model,
+        best_f: Union[float, torch.Tensor],
+        paths,
+        clamp_min: float,
+        optimize_acqf_options: dict[str, Any] | None = None,
+        bounds: torch.Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
+        device: torch.device = torch.device("cpu"),
+        **kwargs: Any,
     ):
         """
         The VES(-Gamma) class should be initialized with following args
@@ -34,27 +34,23 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
         super().__init__(model=model)
         self.sampling_model = deepcopy(model)
         self.best_f = best_f
-        self.optimal_outputs = optimize_posterior_samples(
-            paths,
-            bounds,
-            device=device
-        )
+        self.optimal_outputs = optimize_posterior_samples(paths, bounds, device=device)
         self.paths = paths
         self.bounds = bounds
         self.clamp_min = clamp_min
         if optimize_acqf_options is None:
             optimize_acqf_options = {
                 "num_restarts": 5,
-                "raw_samples" : 1024,
-                "options"     : {"sample_around_best": True}
+                "raw_samples": 1024,
+                "options": {"sample_around_best": True},
             }
         self.optimize_acqf_options = optimize_acqf_options
 
     def forward(
-            self,
-            x: torch.Tensor,
-            num_iter: int = 64,
-            **kwargs: Any,
+        self,
+        x: torch.Tensor,
+        num_iter: int = 64,
+        **kwargs: Any,
     ):
         """
         This VES class implements VES-Exp, a special case of VES, and expected to be
@@ -79,7 +75,7 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
             self.optimal_outputs,
             kval.item(),
             betaval.item(),
-            self.clamp_min
+            self.clamp_min,
         )
         # Step 2: Given k and beta, find optimal X
         with gpytorch.settings.cholesky_max_tries(9):
@@ -87,15 +83,12 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
                 halfVES,
                 bounds=self.bounds.T,
                 q=1,  # Number of candidates to optimize for
-                **self.optimize_acqf_options
+                **self.optimize_acqf_options,
             )
 
         return current_x, acq_value, kval.item(), betaval.item()
 
-    def generate_max_value_term(
-            self,
-            X: torch.Tensor
-    ):
+    def generate_max_value_term(self, X: torch.Tensor):
         """
         This function generate values of y^* - max(y_x, y^*_t) given
         position X and paths.
@@ -107,6 +100,8 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
         """
         posterior_samples = self.paths(X.squeeze(1))
         improvement_term = torch.max(posterior_samples, self.best_f)
-        max_value_term = (self.optimal_outputs.squeeze(1) - improvement_term).clamp_min(self.clamp_min)
+        max_value_term = (self.optimal_outputs.squeeze(1) - improvement_term).clamp_min(
+            self.clamp_min
+        )
         # This should be able to be logged, since it is per-sample
         return max_value_term
