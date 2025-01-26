@@ -44,9 +44,11 @@ if __name__ == "__main__":
     argparse.add_argument("--acqf_num_restarts", type=int, default=5)
     argparse.add_argument("--sample_around_best", type=str2bool, default=True)
     argparse.add_argument("--run_ei", type=str2bool, default=False)
+    argparse.add_argument("--run_logei", type=str2bool, default=False)
     argparse.add_argument("--run_mes", type=str2bool, default=False)
     argparse.add_argument("--run_vesseq", type=str2bool, default=False)
-    argparse.add_argument("--decay_target", type=int, default=None, help="The number of iterations to reach the final k (num_bo_iter if None)")
+    argparse.add_argument("--decay_target", type=int, default=None,
+                          help="The number of iterations to reach the final k (num_bo_iter if None)")
     argparse.add_argument("--k_target", type=float, default=0.5, help="The final k value")
     argparse.add_argument("--exponential_family", type=str2bool, default=False)
     argparse.add_argument("--set_lengthscale", type=float, default=None)
@@ -66,6 +68,7 @@ if __name__ == "__main__":
     benchmark_name = args.benchmark
     clamp_min = args.clamp_min
     run_ei = args.run_ei
+    run_log_ei = args.run_logei
     run_mes = args.run_mes
     run_vesseq = args.run_vesseq
     init_k = args.k_init
@@ -77,9 +80,9 @@ if __name__ == "__main__":
     device = torch.device(args.device) if torch.cuda.is_available() else torch.device("cpu")
     print(f"Device: {device}")
 
-    # When both run_ei and run_mes are True, run_ei will be executed
-    if args.run_ei and args.run_mes:
-        args.run_mes = False
+    # check that at most one of run_ei, run_log_ei, run_mes, run_vesseq is True
+    assert sum([run_ei, run_log_ei, run_mes,
+                run_vesseq]) <= 1, "At most one of run_ei, run_log_ei, run_mes, run_vesseq can be True"
 
     # Define the objective function
     objective, D = get_objective(benchmark_name=args.benchmark, device=device)
@@ -109,16 +112,17 @@ if __name__ == "__main__":
         ves_class = VariationalEntropySearchGamma
     acqf_options = {
         "num_restarts": args.acqf_num_restarts,
-        "raw_samples" : args.acqf_raw_samples,
-        "options"     : {"sample_around_best": args.sample_around_best}
+        "raw_samples": args.acqf_raw_samples,
+        "options": {"sample_around_best": args.sample_around_best}
     }
 
     n_init = args.n_init
-    #train_x_ves = torch.rand(n_init, D, dtype=torch.double, device=device)
-    train_x_ves = init_samples(n_init=n_init, dim=D, seed = os.environ.get("SLURM_ARRAY_TASK_ID", None)).to(dtype=torch.double, device=device)
+    # train_x_ves = torch.rand(n_init, D, dtype=torch.double, device=device)
+    train_x_ves = init_samples(n_init=n_init, dim=D, seed=os.environ.get("SLURM_ARRAY_TASK_ID", None)).to(
+        dtype=torch.double, device=device)
     train_y_ves = torch.Tensor([objective(x) for x in train_x_ves]).unsqueeze(1).to(dtype=torch.double, device=device)
 
-    if run_ei:
+    if run_ei or run_log_ei:
         train_x_ei = train_x_ves.clone()
         train_y_ei = train_y_ves.clone()
     if run_mes:
@@ -140,11 +144,12 @@ if __name__ == "__main__":
         lengthscale_prior=lengthscale_prior,
     )
 
-    if run_ei:
+    if run_ei or run_log_ei:
         gp_ei = _get_gp(train_x_ei, train_y_ei)
         mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
         fit_mll_with_adam_backup(mll_ei)  # fit mll hyperparameters
-        ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
+        _ei_func = LogExpectedImprovement if run_log_ei else LogExpectedImprovement
+        ei_model = _ei_func(gp_ei, train_y_ei.max())
     elif run_mes:
         gp_mes = _get_gp(train_x_mes, train_y_mes)
         mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)  # mll object
@@ -156,15 +161,15 @@ if __name__ == "__main__":
         mll_vesseq = ExactMarginalLogLikelihood(gp_vesseq.likelihood, gp_vesseq)  # mll object
         fit_mll_with_adam_backup(mll_vesseq)  # fit mll hyperparameters
         vesseq_model = VariationalEntropySearchGammaSeqK(
-            gp_vesseq, 
-            best_f=train_y_vesseq.max(), 
-            num_paths=num_paths, 
-            clamp_min=clamp_min, 
+            gp_vesseq,
+            best_f=train_y_vesseq.max(),
+            num_paths=num_paths,
+            clamp_min=clamp_min,
             k=init_k,
             bounds=bounds,
             device=device,
         )
-    else:
+    else:  # run VES
         gp_ves = _get_gp(train_x_ves, train_y_ves)
         mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
         fit_mll_with_adam_backup(mll_ves)  # fit mll hyperparameters
@@ -188,7 +193,7 @@ if __name__ == "__main__":
         print(f"+++ Iteration {bo_iter} +++")
         # Define an intial point for VES-Gamma
         X = torch.rand(1, 1, D, dtype=torch.double, device=device)
-        if run_ei:
+        if run_ei or run_log_ei:
             with gpytorch.settings.cholesky_max_tries(9):
                 ei_candidate, acq_value = optimize_acqf(
                     ei_model,
@@ -210,7 +215,7 @@ if __name__ == "__main__":
             # get gp hyperparameters as dictionary
             gp_dict = gp_ei.state_dict()
             # save gp hyperparameters to json
-            #torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ei_iter{bo_iter}.pth")
+            # torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ei_iter{bo_iter}.pth")
             # save gp hyperparameters to tar.xz
             with tarfile.open(f"runs/{run_dir}/hyperparameters.tar.xz", "w:xz") as tar:
                 gp_dict_file = io.BytesIO()
@@ -223,7 +228,8 @@ if __name__ == "__main__":
             gp_ei = _get_gp(train_x_ei, train_y_ei)
             mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
             fit_mll_with_adam_backup(mll_ei)  # fit mll hyperpara
-            ei_model = LogExpectedImprovement(gp_ei, train_y_ei.max())
+            _ei_func = LogExpectedImprovement if run_log_ei else LogExpectedImprovement
+            ei_model = _ei_func(gp_ei, train_y_ei.max())
         elif run_mes:
             with gpytorch.settings.cholesky_max_tries(9):
                 mes_candidate, acq_value = optimize_acqf(
@@ -299,15 +305,15 @@ if __name__ == "__main__":
             k_plus = init_k - k_target
             decay_target = args.decay_target if args.decay_target is not None else args.num_bo_iter
             # set up the decay rate so that the final k is 1.05
-            decay_rate = (math.log(k_plus) - math.log(0.05))/decay_target
+            decay_rate = (math.log(k_plus) - math.log(0.05)) / decay_target
             k_next = (init_k - k_target) * math.exp(-decay_rate * bo_iter) + k_target
             print(f"Next k: {k_next}")
             vesseq_model = VariationalEntropySearchGammaSeqK(
-                gp_vesseq, 
-                best_f=train_y_vesseq.max(), 
-                num_paths=num_paths, 
-                clamp_min=clamp_min, 
-                #k=init_k / np.log(2 + bo_iter),
+                gp_vesseq,
+                best_f=train_y_vesseq.max(),
+                num_paths=num_paths,
+                clamp_min=clamp_min,
+                # k=init_k / np.log(2 + bo_iter),
                 k=k_next,
                 bounds=bounds,
                 device=device
