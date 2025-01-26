@@ -50,7 +50,7 @@ if __name__ == "__main__":
     argparse.add_argument("--acqf_num_restarts", type=int, default=5)
     argparse.add_argument("--sample_around_best", type=str2bool, default=True)
     argparse.add_argument("--run_ei", type=str2bool, default=False)
-    argparse.add_argument("--run_logei", type=str2bool, default=False)
+    argparse.add_argument("--run_old_ei", type=str2bool, default=False)
     argparse.add_argument("--run_mes", type=str2bool, default=False)
     argparse.add_argument("--run_vesseq", type=str2bool, default=False)
     argparse.add_argument(
@@ -81,8 +81,8 @@ if __name__ == "__main__":
     num_paths = args.num_paths
     benchmark_name = args.benchmark
     clamp_min = args.clamp_min
-    run_ei = args.run_ei
-    run_log_ei = args.run_logei
+    run_ei = args.run_old_ei
+    run_log_ei = args.run_ei
     run_mes = args.run_mes
     run_vesseq = args.run_vesseq
     init_k = args.k_init
