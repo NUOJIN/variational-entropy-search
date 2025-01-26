@@ -58,6 +58,7 @@ AVAILABLE_BENCHMARKS = ['ackley2',
                         "mujoco-halfcheetah",
                         "mujoco-walker",
                         "schwefel100",
+                        "schwefel10",
                         "schwefel300",
                         "schwefel500",
                         'levy4',
@@ -66,6 +67,7 @@ AVAILABLE_BENCHMARKS = ['ackley2',
                         "levy500",
                         'michalewicz10',
                         'griewank8',
+                        'griewank8_small_space',
                         "griewank100",
                         "griewank300",
                         "griewank500", ]
@@ -406,6 +408,9 @@ def get_objective(
         case 'griewank8':
             benchmark_dim = 8
             benchmark_type = BenchmarkType.BOTORCH
+        case 'griewank8_small_space':
+            benchmark_dim = 8
+            benchmark_type = BenchmarkType.BOTORCH
         case 'griewank100':
             benchmark_dim = 100
             benchmark_type = BenchmarkType.BOTORCH
@@ -414,6 +419,9 @@ def get_objective(
             benchmark_type = BenchmarkType.BOTORCH
         case 'griewank500':
             benchmark_dim = 500
+            benchmark_type = BenchmarkType.BOTORCH
+        case 'schwefel10':
+            benchmark_dim = 10
             benchmark_type = BenchmarkType.BOTORCH
         case 'schwefel100':
             benchmark_dim = 100
@@ -474,8 +482,11 @@ def get_objective(
                 return _f(x_eval)
             elif benchmark_name.startswith('griewank'):
                 # name is something like griewank300
-                dim = int(benchmark_name[8:])
-                griewank_bounds = torch.tensor([[-600, 600]] * dim, dtype=torch.double, device=device).T
+                dim = int(benchmark_name[8:].split('_')[0])
+                if not benchmark_name.endswith('small_space'):
+                    griewank_bounds = torch.tensor([[-600, 600]] * dim, dtype=torch.double, device=device).T
+                else:
+                    griewank_bounds = torch.tensor([[-10, 10]] * dim, dtype=torch.double, device=device).T
                 x_eval = x * (griewank_bounds[1] - griewank_bounds[0]) + griewank_bounds[0]
 
                 _f = Griewank(negate=True, dim=dim)
