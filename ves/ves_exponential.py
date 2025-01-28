@@ -87,21 +87,3 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
             )
 
         return current_x, acq_value, kval.item(), betaval.item()
-
-    def generate_max_value_term(self, X: torch.Tensor):
-        """
-        This function generate values of y^* - max(y_x, y^*_t) given
-        position X and paths.
-        Args:
-            X: current inputs. Size: batch_size x q=1 x dim
-        Return:
-            max_value_term: y^* - max(y_x, y^*_t).
-            Size: NUM_PATH x batch_size
-        """
-        posterior_samples = self.paths(X.squeeze(1))
-        improvement_term = torch.max(posterior_samples, self.best_f)
-        max_value_term = (self.optimal_outputs.squeeze(1) - improvement_term).clamp_min(
-            self.clamp_min
-        )
-        # This should be able to be logged, since it is per-sample
-        return max_value_term

@@ -50,6 +50,9 @@ AVAILABLE_BENCHMARKS = [
     "prior_sample_50d_ls0.5",
     "prior_sample_50d_ls1",
     "prior_sample_50d_ls2",
+    "prior_sample_100d_ls0.05",
+    "prior_sample_100d_ls0.1",
+    "prior_sample_100d_ls0.25",
     "prior_sample_100d_ls0.5",
     "prior_sample_100d_ls1",
     "prior_sample_100d_ls2",
@@ -190,6 +193,8 @@ def get_gp(
         loc = torch.tensor(math.log(2.0) + math.log(D) / 2).to(train_x)
         scale = torch.tensor(math.sqrt(3.0)).to(train_x)
         _lengthscale_prior = LogNormalPrior(loc, scale)
+    else:
+        raise ValueError("Invalid lengthscale prior")
 
     covar_module = ScaleKernel(
         MaternKernel(nu=2.5, ard_num_dims=D, lengthscale_prior=_lengthscale_prior)
@@ -282,11 +287,10 @@ def optimize_posterior_samples(
 
     Args:
         paths: Tample paths from the GP which can be called via forward()
-        x: evaluation position for y_x
         bounds: The bounds on the search space.
         raw_samples: The number of samples with which to query the samples initially.
-        num_restarts The number of gradient descent steps to use on each of the best
-        found initial points.
+        num_restarts: The number of gradient descent steps to use on each of the best found initial points.
+        device: The device to use for the optimization.
         maxiter: The maximal permitted number of gradient descent steps.
         lr: The stepsize of the gradient descent steps.
 
@@ -306,7 +310,7 @@ def optimize_posterior_samples(
     argtop_candidates = candidate_queries.topk(dim=-1, k=num_restarts)[1]
 
     # These are used as masks when retrieving the argmaxes
-    X_argtop = candidate_set[argtop_candidates, :].requires_grad_(requires_grad=True)
+    X_argtop = candidate_set[argtop_candidates, :].requires_grad_(True)
     for i in range(maxiter):
         per_sample_outputs = paths.forward(X_argtop)
         grads = torch.autograd.grad(
@@ -442,7 +446,7 @@ def get_objective(
 
     def objective(
         x: Tensor,
-    ) -> Tensor:
+    ) -> Tensor | float:
         """
         The objective function
 
@@ -561,7 +565,7 @@ def get_objective(
                         raise e
                     time.sleep(5)
             # negate the result since we are maximizing
-            _res = -res.value
+            _res = -res.value # noqa
             # to torch.double
             return torch.tensor(_res, dtype=torch.double, device=device)
         elif benchmark_type == BenchmarkType.GP_PRIOR_SAMPLE:
