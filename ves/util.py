@@ -26,7 +26,7 @@ from gpytorch.kernels import ScaleKernel, MaternKernel
 from gpytorch.models import GP
 from gpytorch.priors import GammaPrior, LogNormalPrior
 from linear_operator.utils.errors import NotPSDError
-from scipy.optimize import optimize
+from scipy.optimize import optimize, brentq
 from torch import Tensor, Size
 from torch.quasirandom import SobolEngine
 
@@ -260,15 +260,22 @@ def find_root_log_minus_digamma(intercept, tol=1e-5, lower_bound=1e-8, upper_bou
     def f(x):
         return math.log(x) - scipy.special.digamma(x) - intercept
 
-    def f_least_square(x):
-        return f(x) ** 2
+    if intercept < 0:
+        raise ValueError("Intercept must be non-negative.")
+    elif intercept == 0:
+        # return inf
+        return math.inf
 
     try:
-        root_finding_result = optimize.minimize_scalar(
-            f_least_square, bounds=(lower_bound, upper_bound), options={"xatol": tol}
-        ).x
+        #root_finding_result = optimize.minimize_scalar(
+        #    f_least_square, bounds=(lower_bound, upper_bound), options={"xatol": tol}
+        #).x
+        root_finding_result = brentq(f, lower_bound, upper_bound)
+        print(f"root_finding_result: {root_finding_result}")
     except:
         root_finding_result = 1.0
+
+
 
     return root_finding_result
 

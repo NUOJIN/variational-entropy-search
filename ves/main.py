@@ -29,7 +29,7 @@ from ves.util import (
     init_samples,
 )
 from ves.ves_exponential import VariationalEntropySearchExponential
-from ves.ves_gamma import VariationalEntropySearchGamma
+from ves.ves_gamma import VariationalEntropySearchGamma, VariationalEntropySearchGammaNew
 from ves.ves_gamma_seq_k import VariationalEntropySearchGammaSeqK
 
 if __name__ == "__main__":
@@ -37,7 +37,7 @@ if __name__ == "__main__":
 
     argparse = ArgumentParser()
     argparse.add_argument(
-        "--num_paths", type=int, default=64, help="Number of paths to sample"
+        "--num_paths", type=int, default=128, help="Number of paths to sample"
     )
     argparse.add_argument(
         "--num_iter", type=int, default=50, help="Number of iterations for VES"
@@ -75,6 +75,9 @@ if __name__ == "__main__":
     argparse.add_argument(
         "--benchmark", type=str, choices=AVAILABLE_BENCHMARKS, required=True
     )
+    argparse.add_argument(
+        '--varpro', type=str2bool, default=False, help='Use Variable Projection'
+    )
 
     args = argparse.parse_args()
 
@@ -91,6 +94,7 @@ if __name__ == "__main__":
     gp_outputscale = args.set_outputscale
     lengthscale_prior = args.lengthscale_prior
     stop_tolerance_coeff = args.stop_tolerance_coeff
+    varpro = args.varpro
     device = (
         torch.device(args.device) if torch.cuda.is_available() else torch.device("cpu")
     )
@@ -98,7 +102,7 @@ if __name__ == "__main__":
 
     # check that at most one of run_ei, run_log_ei, run_mes, run_vesseq is True
     assert (
-        sum([run_ei, run_log_ei, run_mes, run_vesseq]) <= 1
+            sum([run_ei, run_log_ei, run_mes, run_vesseq]) <= 1
     ), "At most one of run_ei, run_log_ei, run_mes, run_vesseq can be True"
 
     # Define the objective function
@@ -125,6 +129,8 @@ if __name__ == "__main__":
 
     if args.exponential_family:
         ves_class = VariationalEntropySearchExponential
+    elif varpro:
+        ves_class = VariationalEntropySearchGammaNew
     else:
         ves_class = VariationalEntropySearchGamma
     acqf_options = {
