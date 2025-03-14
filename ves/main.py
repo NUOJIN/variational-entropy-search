@@ -81,6 +81,12 @@ if __name__ == "__main__":
     argparse.add_argument(
         '--reg_lambda', type=float, default=0.0, help='Regularization parameter'
     )
+    argparse.add_argument(
+        '--reg_target', type=float, default=1.0, help='The value we force k to be close to'
+    )
+    argparse.add_argument(
+        '--reg_method', type=str, default="L2", choices=["L2", "proximal"], help='Regularization method'
+    )
 
     args = argparse.parse_args()
 
@@ -103,6 +109,8 @@ if __name__ == "__main__":
     )
     print(f"Device: {device}")
     reg_lambda = args.reg_lambda
+    reg_method = args.reg_method
+    reg_target = args.reg_target
 
     # check that at most one of run_ei, run_log_ei, run_mes, run_vesseq is True
     assert (
@@ -126,6 +134,10 @@ if __name__ == "__main__":
         run_dir = f'{run_dir}_{os.environ["SLURM_ARRAY_TASK_ID"]}'
 
     os.makedirs(f"runs/{run_dir}", exist_ok=True)
+
+    # wait until the directory is created
+    while not os.path.exists(f"runs/{run_dir}"):
+        time.sleep(1)
 
     # save args.json to run_dir
     with open(f"runs/{run_dir}/args.json", "w") as file:
@@ -222,6 +234,7 @@ if __name__ == "__main__":
             stop_tolerance_coeff=stop_tolerance_coeff,
             device=device,
             reg_lambda=reg_lambda,
+            reg_target=reg_target,
         )
         k_vals = []
         beta_vals = []
@@ -375,6 +388,9 @@ if __name__ == "__main__":
             ves_candidate, v, k_val, beta_val = ves_model(
                 X, num_paths=num_paths, num_iter=args.num_iter
             )
+            if reg_method == "proximal":
+                print(f"next k_target: {k_val}")
+                reg_target = k_val
             k_vals.append(k_val)
             beta_vals.append(beta_val)
             train_x_ves = torch.cat([train_x_ves, ves_candidate], dim=0)
@@ -424,6 +440,8 @@ if __name__ == "__main__":
                 clamp_min=clamp_min,
                 acqf_options=acqf_options,
                 device=device,
+                reg_lambda=reg_lambda,
+                reg_target=reg_target,
             )
 
             _time_passed = time.time() - start_time

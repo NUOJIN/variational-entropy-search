@@ -30,6 +30,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             stop_tolerance_coeff: float = 1e-5,
             device: torch.device = torch.device("cpu"),
             reg_lambda: float = 0,
+            reg_target: float = 1,
             **kwargs: Any,
     ):
         """
@@ -60,6 +61,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
             }
         self.optimize_acqf_options = optimize_acqf_options
         self.reg_lambda = reg_lambda
+        self.reg_target = reg_target
 
     def forward(
             self,
@@ -170,7 +172,7 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         x_np = x.flatten().detach().cpu().numpy()
         res = np.zeros_like(x_np)
         for i, intercept in enumerate(x_np):
-            res[i] = find_root_log_minus_digamma(intercept, reg_lambda=self.reg_lambda)
+            res[i] = find_root_log_minus_digamma(intercept, reg_lambda=self.reg_lambda, reg_target=self.reg_target)
         return torch.Tensor(res).reshape(x.shape).to(dtype=dtype, device=device)
 
 
@@ -187,6 +189,7 @@ class VariationalEntropySearchGammaNew(MCAcquisitionFunction):
             stop_tolerance_coeff: float = 1e-5,
             device: torch.device = torch.device("cpu"),
             reg_lambda: float = 0,
+            reg_target: float = 1,
             **kwargs: Any,
     ):
         """
@@ -217,6 +220,7 @@ class VariationalEntropySearchGammaNew(MCAcquisitionFunction):
             }
         self.optimize_acqf_options = optimize_acqf_options
         self.reg_lambda = reg_lambda
+        self.reg_target = reg_target
 
     def forward(
             self,
@@ -254,6 +258,7 @@ class VariationalEntropySearchGammaNew(MCAcquisitionFunction):
             self.optimal_outputs,
             self.clamp_min,
             reg_lambda=self.reg_lambda,
+            reg_target=self.reg_target,
         )
         # Step 2: Given k and beta, find optimal X
         with gpytorch.settings.cholesky_max_tries(9):

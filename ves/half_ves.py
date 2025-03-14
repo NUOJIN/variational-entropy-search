@@ -75,6 +75,7 @@ class HalfVESNew(MCAcquisitionFunction):
             optimal_outputs: torch.Tensor,
             clamp_min: float = 1e-10,
             reg_lambda: float = 0.0,
+            reg_target: float = 1.0,
     ):
         """
         HalfVESGamma is initialized with following args
@@ -100,6 +101,7 @@ class HalfVESNew(MCAcquisitionFunction):
         self.beta_val = None
         self.k_val = None
         self.reg_lambda = reg_lambda
+        self.reg_target = reg_target
 
     def forward(self, x: torch.Tensor):
         """
@@ -161,5 +163,5 @@ class HalfVESNew(MCAcquisitionFunction):
         x_np = x.flatten().detach().cpu().numpy()
         res = np.zeros_like(x_np)
         for i, intercept in enumerate(x_np):
-            res[i] = find_root_log_minus_digamma(intercept, reg_lambda=self.reg_lambda)
+            res[i] = find_root_log_minus_digamma(intercept, reg_lambda=self.reg_lambda, reg_target=self.reg_target)
         return torch.Tensor(res).reshape(x.shape).to(dtype=dtype, device=device)

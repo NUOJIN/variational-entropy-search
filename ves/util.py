@@ -243,15 +243,24 @@ def robust_draw_matheron_paths(
         return draw_matheron_paths(model, sample_shape, **kwargs)
 
 
-def find_root_log_minus_digamma(intercept, tol=1e-5, lower_bound=1e-8, upper_bound=1e8, reg_lambda: float = 0):
+def find_root_log_minus_digamma(
+        intercept, tol=1e-5,
+        lower_bound=1e-8,
+        upper_bound=1e8,
+        reg_lambda: float = 0,
+        reg_target: float = 1.0
+):
     """
     Find a root of the function log(x) - digamma(x) - intercept using a combination of
     the bisection method and Newton's method.
 
     Args:
     intercept (float or tensor): The constant value to subtract in the function.
-    tol (float): Tolerance for convergence.
-    max_iter (int): Maximum number of iterations.
+    lower_bound (float): The lower bound for the root search.
+    upper_bound (float): The upper bound for the root search.
+    reg_lambda (float): The regularization parameter.
+    reg_target (float): The target value for regularization.
+
 
     Returns:
     float or tensor: Approximate root of the function.
@@ -261,7 +270,7 @@ def find_root_log_minus_digamma(intercept, tol=1e-5, lower_bound=1e-8, upper_bou
         return math.log(x) - scipy.special.digamma(x) - intercept
 
     def f_least_square(x):
-        return (f(x) ** 2) + reg_lambda * (x - 1) ** 2  # we want to find the root of f(x), so we square it
+        return (f(x) ** 2) + reg_lambda * (x - reg_target) ** 2  # we want to find the root of f(x), so we square it
 
     if intercept < 0:
         raise ValueError("Intercept must be non-negative.")
