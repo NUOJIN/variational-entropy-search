@@ -1,9 +1,10 @@
 from typing import Union
 
-import torch
 import numpy as np
+import torch
 from botorch.acquisition import MCAcquisitionFunction
 from botorch.models.model import Model
+
 from ves.util import (
     find_root_log_minus_digamma,
 )
@@ -73,6 +74,7 @@ class HalfVESNew(MCAcquisitionFunction):
             paths,
             optimal_outputs: torch.Tensor,
             clamp_min: float = 1e-10,
+            reg_lambda: float = 0.0,
     ):
         """
         HalfVESGamma is initialized with following args
@@ -90,12 +92,14 @@ class HalfVESNew(MCAcquisitionFunction):
         # Assign posterior path
         self.paths = paths
         # Assign best value so far y^*_t
+
         self.best_f = best_f
         # Assign optimal outputs y^*
         self.optimal_outputs = optimal_outputs
         self.clamp_min = clamp_min
         self.beta_val = None
         self.k_val = None
+        self.reg_lambda = reg_lambda
 
     def forward(self, x: torch.Tensor):
         """
@@ -157,5 +161,5 @@ class HalfVESNew(MCAcquisitionFunction):
         x_np = x.flatten().detach().cpu().numpy()
         res = np.zeros_like(x_np)
         for i, intercept in enumerate(x_np):
-            res[i] = find_root_log_minus_digamma(intercept)
+            res[i] = find_root_log_minus_digamma(intercept, reg_lambda=self.reg_lambda)
         return torch.Tensor(res).reshape(x.shape).to(dtype=dtype, device=device)

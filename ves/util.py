@@ -26,7 +26,7 @@ from gpytorch.kernels import ScaleKernel, MaternKernel
 from gpytorch.models import GP
 from gpytorch.priors import GammaPrior, LogNormalPrior
 from linear_operator.utils.errors import NotPSDError
-from scipy.optimize import optimize, brentq
+from scipy.optimize import minimize_scalar
 from torch import Tensor, Size
 from torch.quasirandom import SobolEngine
 
@@ -120,7 +120,7 @@ def torch_random_seed(seed: int | None):
 
 
 def fit_mll_with_adam_backup(
-    mll: ExactMarginalLogLikelihood,
+        mll: ExactMarginalLogLikelihood,
 ) -> None:
     """
     Fit the likelihood using BoTorch's fit_mll but use Adam if the original optimization fails.
@@ -158,12 +158,12 @@ def fit_mll_with_adam_backup(
 
 
 def get_gp(
-    train_x: Tensor,
-    train_y: Tensor,
-    gp_lengthscale: Optional[float] = None,
-    gp_noise: Optional[float] = None,
-    gp_outputscale: Optional[float] = None,
-    lengthscale_prior: Optional[str] = None,
+        train_x: Tensor,
+        train_y: Tensor,
+        gp_lengthscale: Optional[float] = None,
+        gp_noise: Optional[float] = None,
+        gp_outputscale: Optional[float] = None,
+        lengthscale_prior: Optional[str] = None,
 ) -> SingleTaskGP:
     """
     Get a GP model with a Matern kernel and Gamma prior on the lengthscale.
@@ -224,9 +224,9 @@ def get_gp(
 
 
 def robust_draw_matheron_paths(
-    model: GP,
-    sample_shape: Size,
-    **kwargs: Any,
+        model: GP,
+        sample_shape: Size,
+        **kwargs: Any,
 ) -> MatheronPath:
     """
     Wrapper around draw_matheron_paths that sets the number of Cholesky decomposition tries to 9.
@@ -243,7 +243,7 @@ def robust_draw_matheron_paths(
         return draw_matheron_paths(model, sample_shape, **kwargs)
 
 
-def find_root_log_minus_digamma(intercept, tol=1e-5, lower_bound=1e-8, upper_bound=1e8):
+def find_root_log_minus_digamma(intercept, tol=1e-5, lower_bound=1e-8, upper_bound=1e8, reg_lambda: float = 0):
     """
     Find a root of the function log(x) - digamma(x) - intercept using a combination of
     the bisection method and Newton's method.
@@ -260,6 +260,9 @@ def find_root_log_minus_digamma(intercept, tol=1e-5, lower_bound=1e-8, upper_bou
     def f(x):
         return math.log(x) - scipy.special.digamma(x) - intercept
 
+    def f_least_square(x):
+        return (f(x) ** 2) + reg_lambda * (x - 1) ** 2  # we want to find the root of f(x), so we square it
+
     if intercept < 0:
         raise ValueError("Intercept must be non-negative.")
     elif intercept == 0:
@@ -267,27 +270,25 @@ def find_root_log_minus_digamma(intercept, tol=1e-5, lower_bound=1e-8, upper_bou
         return math.inf
 
     try:
-        #root_finding_result = optimize.minimize_scalar(
-        #    f_least_square, bounds=(lower_bound, upper_bound), options={"xatol": tol}
-        #).x
-        root_finding_result = brentq(f, lower_bound, upper_bound)
-        print(f"root_finding_result: {root_finding_result}")
+        root_finding_result = minimize_scalar(
+            f_least_square, bounds=(lower_bound, upper_bound), options={"xatol": tol}
+        ).x
+        # root_finding_result = brentq(f, lower_bound, upper_bound)
+        # print(f"root_finding_result: {root_finding_result}")
     except:
         root_finding_result = 1.0
-
-
 
     return root_finding_result
 
 
 def optimize_posterior_samples(
-    paths,
-    bounds: Tensor,
-    raw_samples: Optional[int] = 2048,
-    num_restarts: Optional[int] = 10,
-    maxiter: int = 100,
-    lr: float = 2.5e-4,
-    device: torch.device = torch.device("cpu"),
+        paths,
+        bounds: Tensor,
+        raw_samples: Optional[int] = 2048,
+        num_restarts: Optional[int] = 10,
+        maxiter: int = 100,
+        lr: float = 2.5e-4,
+        device: torch.device = torch.device("cpu"),
 ) -> Tuple[Tensor, Tensor]:
     r"""Cheaply optimizes posterior samples by random querying followed by vanilla
     gradient descent on the best num_restarts points.
@@ -342,8 +343,8 @@ class BenchmarkType(Enum):
 
 
 def get_objective(
-    benchmark_name: str,
-    device: torch.device,
+        benchmark_name: str,
+        device: torch.device,
 ) -> Tuple[Callable[[Tensor], Tensor], int]:
     """
 
@@ -452,7 +453,7 @@ def get_objective(
             raise ValueError("Invalid benchmark")
 
     def objective(
-        x: Tensor,
+            x: Tensor,
     ) -> Tensor | float:
         """
         The objective function
@@ -495,8 +496,8 @@ def get_objective(
                     [[0, math.pi]] * dim, dtype=torch.double, device=device
                 ).T
                 x_eval = (
-                    x * (michalewicz_bounds[1] - michalewicz_bounds[0])
-                    + michalewicz_bounds[0]
+                        x * (michalewicz_bounds[1] - michalewicz_bounds[0])
+                        + michalewicz_bounds[0]
                 )
 
                 _f = Michalewicz(negate=True, dim=dim)
@@ -513,7 +514,7 @@ def get_objective(
                         [[-10, 10]] * dim, dtype=torch.double, device=device
                     ).T
                 x_eval = (
-                    x * (griewank_bounds[1] - griewank_bounds[0]) + griewank_bounds[0]
+                        x * (griewank_bounds[1] - griewank_bounds[0]) + griewank_bounds[0]
                 )
 
                 _f = Griewank(negate=True, dim=dim)
@@ -525,7 +526,7 @@ def get_objective(
                     [[-500, 500]] * dim, dtype=torch.double, device=device
                 ).T
                 x_eval = (
-                    x * (schwefel_bounds[1] - schwefel_bounds[0]) + schwefel_bounds[0]
+                        x * (schwefel_bounds[1] - schwefel_bounds[0]) + schwefel_bounds[0]
                 )
 
                 def schwefel(x: Tensor, dim: int, negate: bool) -> Tensor:
@@ -572,7 +573,7 @@ def get_objective(
                         raise e
                     time.sleep(5)
             # negate the result since we are maximizing
-            _res = -res.value # noqa
+            _res = -res.value  # noqa
             # to torch.double
             return torch.tensor(_res, dtype=torch.double, device=device)
         elif benchmark_type == BenchmarkType.GP_PRIOR_SAMPLE:

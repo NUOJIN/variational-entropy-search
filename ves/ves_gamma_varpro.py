@@ -20,16 +20,17 @@ from ves.util import (
 class VariableProjectionVariationalEntropySearchGamma(MCAcquisitionFunction):
 
     def __init__(
-        self,
-        model: Model,
-        best_f: Union[float, torch.Tensor],
-        paths: MatheronPath,
-        clamp_min: float,
-        optimize_acqf_options: dict[str, Any] | None = None,
-        bounds: torch.Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
-        stop_tolerance_coeff: float = 1e-5,
-        device: torch.device = torch.device("cpu"),
-        **kwargs: Any,
+            self,
+            model: Model,
+            best_f: Union[float, torch.Tensor],
+            paths: MatheronPath,
+            clamp_min: float,
+            optimize_acqf_options: dict[str, Any] | None = None,
+            bounds: torch.Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
+            stop_tolerance_coeff: float = 1e-5,
+            device: torch.device = torch.device("cpu"),
+            reg_lambda: float = 0,
+            **kwargs: Any,
     ):
         """
         The VES(-Gamma) class should be initialized with following args
@@ -58,14 +59,15 @@ class VariableProjectionVariationalEntropySearchGamma(MCAcquisitionFunction):
                 "options": {"sample_around_best": True},
             }
         self.optimize_acqf_options = optimize_acqf_options
+        self.reg_lambda = reg_lambda
 
     def forward(
-        self,
-        x: torch.Tensor,
-        num_paths: int,
-        num_iter: int = 64,
-        show_progress: bool = True,
-        **kwargs: Any,
+            self,
+            x: torch.Tensor,
+            num_paths: int,
+            num_iter: int = 64,
+            show_progress: bool = True,
+            **kwargs: Any,
     ):
         """
         This VES class implements VES-Gamma, a special case of VES.
@@ -113,7 +115,7 @@ class VariableProjectionVariationalEntropySearchGamma(MCAcquisitionFunction):
                     **self.optimize_acqf_options,
                 )
             if torch.norm(new_x - x_current) < self.stop_tolerance_coeff * self.bounds.size(
-                0
+                    0
             ):
                 break
             x_current = new_x
@@ -171,5 +173,5 @@ class VariableProjectionVariationalEntropySearchGamma(MCAcquisitionFunction):
         x_np = x.flatten().detach().cpu().numpy()
         res = np.zeros_like(x_np)
         for i, intercept in enumerate(x_np):
-            res[i] = find_root_log_minus_digamma(intercept)
+            res[i] = find_root_log_minus_digamma(intercept, reg_lambda=self.reg_lambda)
         return torch.Tensor(res).reshape(x.shape).to(dtype=dtype, device=device)

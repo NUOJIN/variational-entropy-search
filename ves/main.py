@@ -40,7 +40,7 @@ if __name__ == "__main__":
         "--num_paths", type=int, default=128, help="Number of paths to sample"
     )
     argparse.add_argument(
-        "--num_iter", type=int, default=50, help="Number of iterations for VES"
+        "--num_iter", type=int, default=5, help="Number of iterations for VES"
     )
     argparse.add_argument("--num_bo_iter", type=int, default=500)
     argparse.add_argument("--n_init", type=int, default=20)
@@ -78,6 +78,9 @@ if __name__ == "__main__":
     argparse.add_argument(
         '--varpro', type=str2bool, default=False, help='Use Variable Projection'
     )
+    argparse.add_argument(
+        '--reg_lambda', type=float, default=0.0, help='Regularization parameter'
+    )
 
     args = argparse.parse_args()
 
@@ -99,6 +102,7 @@ if __name__ == "__main__":
         torch.device(args.device) if torch.cuda.is_available() else torch.device("cpu")
     )
     print(f"Device: {device}")
+    reg_lambda = args.reg_lambda
 
     # check that at most one of run_ei, run_log_ei, run_mes, run_vesseq is True
     assert (
@@ -217,6 +221,7 @@ if __name__ == "__main__":
             acqf_options=acqf_options,
             stop_tolerance_coeff=stop_tolerance_coeff,
             device=device,
+            reg_lambda=reg_lambda,
         )
         k_vals = []
         beta_vals = []
