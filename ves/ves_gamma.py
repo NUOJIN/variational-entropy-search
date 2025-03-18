@@ -160,6 +160,8 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         A = max_value_term.mean(dim=0)
         B = (torch.log(max_value_term)).mean(dim=0)
         self.v = torch.log(A) - B
+        # enure positivity of v
+        self.v = self.v.clamp_min(1e-10)
         k_vals = self.root_finding(self.v)
         beta_vals = k_vals / A
         return k_vals, beta_vals

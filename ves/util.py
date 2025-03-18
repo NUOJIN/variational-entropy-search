@@ -244,7 +244,8 @@ def robust_draw_matheron_paths(
 
 
 def find_root_log_minus_digamma(
-        intercept, tol=1e-5,
+        intercept,
+        tol=1e-5,
         lower_bound=1e-8,
         upper_bound=1e8,
         reg_lambda: float = 0,

@@ -45,7 +45,10 @@ class HalfVES(MCAcquisitionFunction):
         self.optimal_outputs = optimal_outputs
         self.clamp_min = clamp_min
 
-    def forward(self, x: torch.Tensor):
+    def forward(
+            self,
+            x: torch.Tensor
+            ):
         """
         The forward function evaluates ESLB for fixed k and beta
         Follow Eq 3.8
@@ -63,7 +66,9 @@ class HalfVES(MCAcquisitionFunction):
         log_max_value = max_value_term.log()
         improvement_mean = improvement_term.mean(0)
         log_max_mean = log_max_value.mean(0)
-        return ((self.k - 1) * log_max_mean + self.beta * improvement_mean).squeeze()
+        acq_vals = ((self.k - 1) * log_max_mean + self.beta * improvement_mean).squeeze()
+        # softmax transformation for stability
+        return acq_vals
 
 
 class HalfVESNew(MCAcquisitionFunction):
@@ -103,7 +108,10 @@ class HalfVESNew(MCAcquisitionFunction):
         self.reg_lambda = reg_lambda
         self.reg_target = reg_target
 
-    def forward(self, x: torch.Tensor):
+    def forward(
+            self,
+            x: torch.Tensor
+            ):
         """
         The forward function evaluates ESLB for fixed k and beta
         Follow Eq 3.8
@@ -121,7 +129,10 @@ class HalfVESNew(MCAcquisitionFunction):
         log_max_mean = log_max_value.mean(0)
         return ((kval - 1) * log_max_mean + betaval * improvement_mean).squeeze()
 
-    def generate_max_value_term(self, x: torch.Tensor):
+    def generate_max_value_term(
+            self,
+            x: torch.Tensor
+            ):
         """
         This function generate values of y^* - max(y_x, y^*_t) given
         position X and paths.
@@ -139,7 +150,10 @@ class HalfVESNew(MCAcquisitionFunction):
         # This should be able to be logged, since it is per-sample
         return max_value_term, improvement_term.unsqueeze(1)
 
-    def find_k(self, max_value_term: torch.Tensor):
+    def find_k(
+            self,
+            max_value_term: torch.Tensor
+            ):
         """
         This function evaluates the optimal values of k and beta
         Args:
@@ -155,7 +169,10 @@ class HalfVESNew(MCAcquisitionFunction):
         beta_vals = k_vals / A
         return k_vals.detach(), beta_vals.detach()
 
-    def root_finding(self, x: torch.Tensor):
+    def root_finding(
+            self,
+            x: torch.Tensor
+            ):
         """
         Root finding function to solve Eq 3.9; Non-differentiable(?)
         """
