@@ -190,6 +190,9 @@ if __name__ == "__main__":
     if run_kg:
         train_x_kg = train_x_ves.clone()
         train_y_kg = train_y_ves.clone()
+    if run_ucb:
+        train_x_ucb = train_x_ves.clone()
+        train_y_ucb = train_y_ves.clone()
 
     bounds = torch.zeros(D, 2, dtype=torch.double, device=device)
     bounds[:, 1] = 1
@@ -431,8 +434,8 @@ if __name__ == "__main__":
             gp_ucb, mll_ucb, train_x_ucb, train_y_ucb = optimize_af_and_fit_model(
                 ucb_model,
                 gp_ucb,
-                train_x_ves,
-                train_y_ves,
+                train_x_ucb,
+                train_y_ucb,
                 "ucb"
             )
 
