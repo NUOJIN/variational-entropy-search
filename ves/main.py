@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import io
 import json
 import math
@@ -13,8 +14,10 @@ from zlib import adler32
 import gpytorch
 import numpy as np
 import torch
-from botorch.acquisition import LogExpectedImprovement
+from botorch.acquisition import LogExpectedImprovement, AcquisitionFunction, qKnowledgeGradient, UpperConfidenceBound
 from botorch.acquisition.max_value_entropy_search import qMaxValueEntropy
+from botorch.acquisition.predictive_entropy_search import qPredictiveEntropySearch
+from botorch.acquisition.utils import get_optimal_samples
 from botorch.optim import optimize_acqf
 from botorch.sampling import SobolEngine
 from gpytorch.mlls import ExactMarginalLogLikelihood
@@ -53,6 +56,9 @@ if __name__ == "__main__":
     argparse.add_argument("--run_old_ei", type=str2bool, default=False)
     argparse.add_argument("--run_mes", type=str2bool, default=False)
     argparse.add_argument("--run_vesseq", type=str2bool, default=False)
+    argparse.add_argument("--run_pes", type=str2bool, default=False)
+    argparse.add_argument("--run_kg", type=str2bool, default=False)
+    argparse.add_argument("--run_ucb", type=str2bool, default=False)
     argparse.add_argument(
         "--decay_target",
         type=int,
@@ -96,7 +102,10 @@ if __name__ == "__main__":
     run_ei = args.run_old_ei
     run_log_ei = args.run_ei
     run_mes = args.run_mes
+    run_pes = args.run_pes
     run_vesseq = args.run_vesseq
+    run_kg = args.run_kg
+    run_ucb = args.run_ucb
     init_k = args.k_init
     gp_lengthscale = args.set_lengthscale
     gp_noise = args.set_noise
@@ -151,8 +160,8 @@ if __name__ == "__main__":
         ves_class = VariationalEntropySearchGamma
     acqf_options = {
         "num_restarts": args.acqf_num_restarts,
-        "raw_samples": args.acqf_raw_samples,
-        "options": {"sample_around_best": args.sample_around_best},
+        "raw_samples" : args.acqf_raw_samples,
+        "options"     : {"sample_around_best": args.sample_around_best},
     }
 
     n_init = args.n_init
@@ -175,6 +184,12 @@ if __name__ == "__main__":
     if run_vesseq:
         train_x_vesseq = train_x_ves.clone()
         train_y_vesseq = train_y_ves.clone()
+    if run_pes:
+        train_x_pes = train_x_ves.clone()
+        train_y_pes = train_y_ves.clone()
+    if run_kg:
+        train_x_kg = train_x_ves.clone()
+        train_y_kg = train_y_ves.clone()
 
     bounds = torch.zeros(D, 2, dtype=torch.double, device=device)
     bounds[:, 1] = 1
@@ -219,6 +234,39 @@ if __name__ == "__main__":
             bounds=bounds,
             device=device,
         )
+    elif run_pes:
+        gp_pes = _get_gp(train_x_pes, train_y_pes)
+        mll_pes = ExactMarginalLogLikelihood(gp_pes.likelihood, gp_pes)  # mll object
+        fit_mll_with_adam_backup(mll_pes)  # fit mll hyperparameters
+        _pes_func = qPredictiveEntropySearch
+        # copy gp to move to cpu
+        optimal_inputs, optimal_outputs = get_optimal_samples(
+            copy.deepcopy(gp_pes).cpu(), bounds=bounds.cpu().T, num_optima=12
+        )
+        pes_model = _pes_func(
+            gp_pes,
+            optimal_inputs=optimal_inputs.to(device=device),
+        )
+    elif run_kg:
+        gp_kg = _get_gp(train_x_kg, train_y_kg)
+        mll_kg = ExactMarginalLogLikelihood(gp_kg.likelihood, gp_kg)
+        fit_mll_with_adam_backup(mll_kg)  # fit mll hyperparameters
+        # get the best observation
+        _kg_func = qKnowledgeGradient
+        kg_model = _kg_func(
+            gp_kg,
+            num_fantasies=64
+        )
+    elif run_ucb:
+        gp_ucb = _get_gp(train_x_ves, train_y_ves)
+        mll_ucb = ExactMarginalLogLikelihood(gp_ucb.likelihood, gp_ucb)
+        fit_mll_with_adam_backup(mll_ucb)  # fit mll hyperparameters
+        # get the best observation
+        _ucb_func = UpperConfidenceBound
+        ucb_model = _ucb_func(
+            gp_ucb,
+            beta=0.1,
+        )
     else:  # run VES
         gp_ves = _get_gp(train_x_ves, train_y_ves)
         mll_ves = ExactMarginalLogLikelihood(gp_ves.likelihood, gp_ves)  # mll object
@@ -245,68 +293,39 @@ if __name__ == "__main__":
         print(f"+++ Iteration {bo_iter} +++")
         # Define an intial point for VES-Gamma
         X = torch.rand(1, 1, D, dtype=torch.double, device=device)
-        if run_ei or run_log_ei:
+
+
+        def optimize_af_and_fit_model(
+                af_model: AcquisitionFunction,
+                gp_model: gpytorch.models.ExactGP,
+                x_data: torch.Tensor,
+                y_data: torch.Tensor,
+                af_name: str
+        ):
             with gpytorch.settings.cholesky_max_tries(9):
-                ei_candidate, acq_value = optimize_acqf(
-                    ei_model,
+                af_candidate, acq_value = optimize_acqf(
+                    af_model,
                     bounds=bounds.T,
                     q=1,  # Number of candidates to optimize for
                     num_restarts=args.acqf_num_restarts,
                     raw_samples=args.acqf_raw_samples,
                 )
-            train_x_ei = torch.cat([train_x_ei, ei_candidate], dim=0)
-            f_ei = objective(ei_candidate)
+            x_data = torch.cat([x_data, af_candidate], dim=0)
+            f_next = objective(af_candidate)
             print(
-                f"EI: cand={ei_candidate}, acq_val={acq_value:.3e}, f_val={f_ei.item():.3e}, f_max={train_y_ei.max()}"
+                f"{af_name}: cand={af_candidate}, acq_val={acq_value:.3e}, f_val={f_next.item():.3e}, f_max={y_data.max()}"
             )
-            train_y_ei = torch.cat([train_y_ei, f_ei.reshape(1, 1)], dim=0)
-            # save the results
-            np.save(f"runs/{run_dir}/train_x_ei.npy", train_x_ei.detach().cpu().numpy())
-            np.save(f"runs/{run_dir}/train_y_ei.npy", train_y_ei.detach().cpu().numpy())
-
-            # get gp hyperparameters as dictionary
-            gp_dict = gp_ei.state_dict()
-            # save gp hyperparameters to json
-            # torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_ei_iter{bo_iter}.pth")
-            # save gp hyperparameters to tar.xz
-            with tarfile.open(f"runs/{run_dir}/hyperparameters.tar.xz", "w:xz") as tar:
-                gp_dict_file = io.BytesIO()
-                torch.save(gp_dict, gp_dict_file)
-                gp_dict_file.seek(0)
-                tarinfo = tarfile.TarInfo(f"gp_hyperparameters_ei_iter{bo_iter}.pth")
-                tarinfo.size = len(gp_dict_file.getbuffer())
-                tar.addfile(tarinfo, gp_dict_file)
-
-            gp_ei = _get_gp(train_x_ei, train_y_ei)
-            mll_ei = ExactMarginalLogLikelihood(gp_ei.likelihood, gp_ei)  # mll object
-            fit_mll_with_adam_backup(mll_ei)  # fit mll hyperpara
-            _ei_func = LogExpectedImprovement if run_log_ei else LogExpectedImprovement
-            ei_model = _ei_func(gp_ei, train_y_ei.max())
-        elif run_mes:
-            with gpytorch.settings.cholesky_max_tries(9):
-                mes_candidate, acq_value = optimize_acqf(
-                    mes_model,
-                    bounds=bounds.T,
-                    q=1,  # Number of candidates to optimize for
-                    num_restarts=args.acqf_num_restarts,
-                    raw_samples=args.acqf_raw_samples,
-                )
-            train_x_mes = torch.cat([train_x_mes, mes_candidate], dim=0)
-            f_mes = objective(mes_candidate)
-            print(
-                f"MES: cand={mes_candidate}, acq_val={acq_value:.3e}, f_val={f_mes.item():.3e}, f_max={train_y_mes.max()}"
-            )
-            train_y_mes = torch.cat([train_y_mes, f_mes.reshape(1, 1)], dim=0)
+            y_data = torch.cat([y_data, f_next.reshape(1, 1)], dim=0)
             # save the results
             np.save(
-                f"runs/{run_dir}/train_x_mes.npy", train_x_mes.detach().cpu().numpy()
+                f"runs/{run_dir}/train_x_{af_name}.npy", x_data.detach().cpu().numpy()
             )
             np.save(
-                f"runs/{run_dir}/train_y_mes.npy", train_y_mes.detach().cpu().numpy()
+                f"runs/{run_dir}/train_y_{af_name}.npy", y_data.detach().cpu().numpy()
             )
 
             # get gp hyperparameters as dictionary
-            gp_dict = gp_mes.state_dict()
+            gp_dict = gp_model.state_dict()
             # save gp hyperparameters to json
             # torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_mes_iter{bo_iter}.pth")
             # save gp hyperparameters to tar.xz
@@ -314,57 +333,50 @@ if __name__ == "__main__":
                 gp_dict_file = io.BytesIO()
                 torch.save(gp_dict, gp_dict_file)
                 gp_dict_file.seek(0)
-                tarinfo = tarfile.TarInfo(f"gp_hyperparameters_mes_iter{bo_iter}.pth")
+                tarinfo = tarfile.TarInfo(f"gp_hyperparameters_{af_name}_iter{bo_iter}.pth")
                 tarinfo.size = len(gp_dict_file.getbuffer())
                 tar.addfile(tarinfo, gp_dict_file)
+
+            gp_model = _get_gp(x_data, y_data)
+            mll = ExactMarginalLogLikelihood(gp_model.likelihood, gp_model)  # mll object
+            fit_mll_with_adam_backup(mll)  # fit mll hyperparameters
+            return gp_model, mll
+
+
+        if run_ei or run_log_ei:
+            gp_ei, mll_ei = optimize_af_and_fit_model(
+                ei_model,
+                gp_ei,
+                train_x_ei,
+                train_y_ei,
+                "ei"
+            )
+
+            fit_mll_with_adam_backup(mll_ei)  # fit mll hyperpara
+            _ei_func = LogExpectedImprovement if run_log_ei else LogExpectedImprovement
+            ei_model = _ei_func(gp_ei, train_y_ei.max())
+        elif run_mes:
+            optimize_af_and_fit_model(
+                mes_model,
+                gp_mes,
+                train_x_mes,
+                train_y_mes,
+                "mes"
+            )
 
             gp_mes = _get_gp(train_x_mes, train_y_mes)
             mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)
             fit_mll_with_adam_backup(mll_mes)
             mes_model = qMaxValueEntropy(gp_mes, candidate_set)
         elif run_vesseq:
-            with gpytorch.settings.cholesky_max_tries(9):
-                vesseq_candidate, acq_value = optimize_acqf(
-                    vesseq_model,
-                    bounds=bounds.T,
-                    q=1,  # Number of candidates to optimize for
-                    num_restarts=args.acqf_num_restarts,
-                    raw_samples=args.acqf_raw_samples,
-                )
-            train_x_vesseq = torch.cat([train_x_vesseq, vesseq_candidate], dim=0)
-            f_vesseq = objective(vesseq_candidate)
-            print(
-                f"VESSeq: cand={vesseq_candidate}, acq_val={acq_value:.3e}, f_val={f_vesseq.item():.3e}, f_max={train_y_vesseq.max()}"
-            )
-            train_y_vesseq = torch.cat([train_y_vesseq, f_vesseq.reshape(1, 1)], dim=0)
-            # save the results
-            np.save(
-                f"runs/{run_dir}/train_x_vesseq.npy",
-                train_x_vesseq.detach().cpu().numpy(),
-            )
-            np.save(
-                f"runs/{run_dir}/train_y_vesseq.npy",
-                train_y_vesseq.detach().cpu().numpy(),
+            gp_vesseq, mll_vesseq = optimize_af_and_fit_model(
+                vesseq_model,
+                gp_vesseq,
+                train_x_vesseq,
+                train_y_vesseq,
+                "vesseq"
             )
 
-            # get gp hyperparameters as dictionary
-            gp_dict = gp_vesseq.state_dict()
-            # save gp hyperparameters to json
-            # torch.save(gp_dict, f"runs/{run_dir}/gp_hyperparameters_mes_iter{bo_iter}.pth")
-            # save gp hyperparameters to tar.xz
-            with tarfile.open(f"runs/{run_dir}/hyperparameters.tar.xz", "w:xz") as tar:
-                gp_dict_file = io.BytesIO()
-                torch.save(gp_dict, gp_dict_file)
-                gp_dict_file.seek(0)
-                tarinfo = tarfile.TarInfo(
-                    f"gp_hyperparameters_vesseq_iter{bo_iter}.pth"
-                )
-                tarinfo.size = len(gp_dict_file.getbuffer())
-                tar.addfile(tarinfo, gp_dict_file)
-
-            gp_vesseq = _get_gp(train_x_vesseq, train_y_vesseq)
-            mll_vesseq = ExactMarginalLogLikelihood(gp_vesseq.likelihood, gp_vesseq)
-            fit_mll_with_adam_backup(mll_vesseq)
             k_target = args.k_target
             k_plus = init_k - k_target
             decay_target = (
@@ -383,6 +395,51 @@ if __name__ == "__main__":
                 k=k_next,
                 bounds=bounds,
                 device=device,
+            )
+        elif run_pes:
+            gp_pes, mll_pes = optimize_af_and_fit_model(
+                pes_model,
+                gp_pes,
+                train_x_pes,
+                train_y_pes,
+                "pes"
+            )
+
+            _pes_func = qPredictiveEntropySearch
+            optimal_inputs, optimal_outputs = get_optimal_samples(
+                copy.deepcopy(gp_pes).cpu(), bounds=bounds.cpu().T, num_optima=12
+            )
+            pes_model = _pes_func(
+                gp_pes,
+                optimal_inputs=optimal_inputs.to(device=device),
+            )
+        elif run_kg:
+            gp_kg, mll_kg = optimize_af_and_fit_model(
+                kg_model,
+                gp_kg,
+                train_x_kg,
+                train_y_kg,
+                "kg"
+            )
+
+            _kg_func = qKnowledgeGradient
+            kg_model = _kg_func(
+                gp_kg,
+                num_fantasies=64
+            )
+        elif run_ucb:
+            gp_ucb, mll_ucb = optimize_af_and_fit_model(
+                ucb_model,
+                gp_ucb,
+                train_x_ves,
+                train_y_ves,
+                "ucb"
+            )
+
+            _ucb_func = UpperConfidenceBound
+            ucb_model = _ucb_func(
+                gp_ucb,
+                beta=0.1,
             )
         else:
             ves_candidate, v, k_val, beta_val = ves_model(
