@@ -340,11 +340,11 @@ if __name__ == "__main__":
             gp_model = _get_gp(x_data, y_data)
             mll = ExactMarginalLogLikelihood(gp_model.likelihood, gp_model)  # mll object
             fit_mll_with_adam_backup(mll)  # fit mll hyperparameters
-            return gp_model, mll
+            return gp_model, mll, x_data, y_data
 
 
         if run_ei or run_log_ei:
-            gp_ei, mll_ei = optimize_af_and_fit_model(
+            gp_ei, mll_ei, train_x_ei, train_y_ei = optimize_af_and_fit_model(
                 ei_model,
                 gp_ei,
                 train_x_ei,
@@ -356,7 +356,7 @@ if __name__ == "__main__":
             _ei_func = LogExpectedImprovement if run_log_ei else LogExpectedImprovement
             ei_model = _ei_func(gp_ei, train_y_ei.max())
         elif run_mes:
-            optimize_af_and_fit_model(
+            gp_mes, mll_mes, train_x_mes, train_y_mes, optimize_af_and_fit_model(
                 mes_model,
                 gp_mes,
                 train_x_mes,
@@ -369,7 +369,7 @@ if __name__ == "__main__":
             fit_mll_with_adam_backup(mll_mes)
             mes_model = qMaxValueEntropy(gp_mes, candidate_set)
         elif run_vesseq:
-            gp_vesseq, mll_vesseq = optimize_af_and_fit_model(
+            gp_vesseq, mll_vesseq, train_x_vesseq, train_y_vesseq = optimize_af_and_fit_model(
                 vesseq_model,
                 gp_vesseq,
                 train_x_vesseq,
@@ -397,7 +397,7 @@ if __name__ == "__main__":
                 device=device,
             )
         elif run_pes:
-            gp_pes, mll_pes = optimize_af_and_fit_model(
+            gp_pes, mll_pes, train_x_pes, train_y_pes = optimize_af_and_fit_model(
                 pes_model,
                 gp_pes,
                 train_x_pes,
@@ -414,7 +414,7 @@ if __name__ == "__main__":
                 optimal_inputs=optimal_inputs.to(device=device),
             )
         elif run_kg:
-            gp_kg, mll_kg = optimize_af_and_fit_model(
+            gp_kg, mll_kg, train_x_kg, train_y_kg = optimize_af_and_fit_model(
                 kg_model,
                 gp_kg,
                 train_x_kg,
@@ -428,7 +428,7 @@ if __name__ == "__main__":
                 num_fantasies=64
             )
         elif run_ucb:
-            gp_ucb, mll_ucb = optimize_af_and_fit_model(
+            gp_ucb, mll_ucb, train_x_ucb, train_y_ucb = optimize_af_and_fit_model(
                 ucb_model,
                 gp_ucb,
                 train_x_ves,
