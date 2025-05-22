@@ -16,7 +16,12 @@ If you use this code in any of your own work, please refer our paper:
 }
 ```
 
-### Support
+## Example run
 
-- **ves.py:** Main file containing *VariationalEntropySearch* class and functions for running 1D and 2D experiments;
+Assuming you have a running [Bencher](https://github.com/LeoIV/bencher) container, you can run VES on the Mopta08 benchmark with the following command:
+
+```bash
+python3 -m ves.main --benchmark mopta08 --exponential_family False \
+--num_paths 128 --lengthscale_prior vbo --num_bo_iter 200 --reg_lambda 1"
+```
 
