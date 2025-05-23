@@ -56,8 +56,8 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         if optimize_acqf_options is None:
             optimize_acqf_options = {
                 "num_restarts": 5,
-                "raw_samples": 1024,
-                "options": {"sample_around_best": True},
+                "raw_samples" : 1024,
+                "options"     : {"sample_around_best": True},
             }
         self.optimize_acqf_options = optimize_acqf_options
         self.reg_lambda = reg_lambda
@@ -130,7 +130,10 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
                 )
         return cur_X, acq_value, kval.item(), betaval.item()
 
-    def generate_max_value_term(self, x: torch.Tensor):
+    def generate_max_value_term(
+            self,
+            x: torch.Tensor
+    ):
         """
         This function generate values of y^* - max(y_x, y^*_t) given
         position X and paths.
@@ -148,7 +151,10 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         # This should be able to be logged, since it is per-sample
         return max_value_term
 
-    def find_k(self, max_value_term: torch.Tensor):
+    def find_k(
+            self,
+            max_value_term: torch.Tensor
+    ):
         """
         This function evaluates the optimal values of k and beta
         Args:
@@ -166,7 +172,10 @@ class VariationalEntropySearchGamma(MCAcquisitionFunction):
         beta_vals = k_vals / A
         return k_vals, beta_vals
 
-    def root_finding(self, x: torch.Tensor):
+    def root_finding(
+            self,
+            x: torch.Tensor
+    ):
         """
         Root finding function to solve Eq 3.9; Non-differentiable(?)
         """
@@ -217,8 +226,8 @@ class VariationalEntropySearchGammaNew(MCAcquisitionFunction):
         if optimize_acqf_options is None:
             optimize_acqf_options = {
                 "num_restarts": 5,
-                "raw_samples": 1024,
-                "options": {"sample_around_best": True},
+                "raw_samples" : 1024,
+                "options"     : {"sample_around_best": True},
             }
         self.optimize_acqf_options = optimize_acqf_options
         self.reg_lambda = reg_lambda

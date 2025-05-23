@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import io
 import json
-import math
 import os
 import tarfile
 import time
@@ -33,7 +32,6 @@ from ves.util import (
 )
 from ves.ves_exponential import VariationalEntropySearchExponential
 from ves.ves_gamma import VariationalEntropySearchGamma, VariationalEntropySearchGammaNew
-from ves.ves_gamma_seq_k import VariationalEntropySearchGammaSeqK
 
 if __name__ == "__main__":
     # Test VES on a trivial example (D=5)
@@ -55,7 +53,6 @@ if __name__ == "__main__":
     argparse.add_argument("--run_ei", type=str2bool, default=False)
     argparse.add_argument("--run_old_ei", type=str2bool, default=False)
     argparse.add_argument("--run_mes", type=str2bool, default=False)
-    argparse.add_argument("--run_vesseq", type=str2bool, default=False)
     argparse.add_argument("--run_pes", type=str2bool, default=False)
     argparse.add_argument("--run_kg", type=str2bool, default=False)
     argparse.add_argument("--run_ucb", type=str2bool, default=False)
@@ -103,7 +100,6 @@ if __name__ == "__main__":
     run_log_ei = args.run_ei
     run_mes = args.run_mes
     run_pes = args.run_pes
-    run_vesseq = args.run_vesseq
     run_kg = args.run_kg
     run_ucb = args.run_ucb
     init_k = args.k_init
@@ -121,10 +117,10 @@ if __name__ == "__main__":
     reg_method = args.reg_method
     reg_target = args.reg_target
 
-    # check that at most one of run_ei, run_log_ei, run_mes, run_vesseq is True
+    # check that at most one of run_ei, run_log_ei, run_mes is True
     assert (
-            sum([run_ei, run_log_ei, run_mes, run_vesseq]) <= 1
-    ), "At most one of run_ei, run_log_ei, run_mes, run_vesseq can be True"
+            sum([run_ei, run_log_ei, run_mes]) <= 1
+    ), "At most one of run_ei, run_log_ei, run_mes can be True"
 
     # Define the objective function
     objective, D = get_objective(benchmark_name=args.benchmark, device=device)
@@ -181,9 +177,6 @@ if __name__ == "__main__":
     if run_mes:
         train_x_mes = train_x_ves.clone()
         train_y_mes = train_y_ves.clone()
-    if run_vesseq:
-        train_x_vesseq = train_x_ves.clone()
-        train_y_vesseq = train_y_ves.clone()
     if run_pes:
         train_x_pes = train_x_ves.clone()
         train_y_pes = train_y_ves.clone()
@@ -222,21 +215,6 @@ if __name__ == "__main__":
             .to(device=device)
         )
         mes_model = qMaxValueEntropy(gp_mes, candidate_set)
-    elif run_vesseq:
-        gp_vesseq = _get_gp(train_x_vesseq, train_y_vesseq)
-        mll_vesseq = ExactMarginalLogLikelihood(
-            gp_vesseq.likelihood, gp_vesseq
-        )  # mll object
-        fit_mll_with_adam_backup(mll_vesseq)  # fit mll hyperparameters
-        vesseq_model = VariationalEntropySearchGammaSeqK(
-            gp_vesseq,
-            best_f=train_y_vesseq.max(),
-            num_paths=num_paths,
-            clamp_min=clamp_min,
-            k=init_k,
-            bounds=bounds,
-            device=device,
-        )
     elif run_pes:
         gp_pes = _get_gp(train_x_pes, train_y_pes)
         mll_pes = ExactMarginalLogLikelihood(gp_pes.likelihood, gp_pes)  # mll object
@@ -371,34 +349,6 @@ if __name__ == "__main__":
             mll_mes = ExactMarginalLogLikelihood(gp_mes.likelihood, gp_mes)
             fit_mll_with_adam_backup(mll_mes)
             mes_model = qMaxValueEntropy(gp_mes, candidate_set)
-        elif run_vesseq:
-            gp_vesseq, mll_vesseq, train_x_vesseq, train_y_vesseq = optimize_af_and_fit_model(
-                vesseq_model,
-                gp_vesseq,
-                train_x_vesseq,
-                train_y_vesseq,
-                "vesseq"
-            )
-
-            k_target = args.k_target
-            k_plus = init_k - k_target
-            decay_target = (
-                args.decay_target if args.decay_target is not None else args.num_bo_iter
-            )
-            # set up the decay rate so that the final k is 1.05
-            decay_rate = (math.log(k_plus) - math.log(0.05)) / decay_target
-            k_next = (init_k - k_target) * math.exp(-decay_rate * bo_iter) + k_target
-            print(f"Next k: {k_next}")
-            vesseq_model = VariationalEntropySearchGammaSeqK(
-                gp_vesseq,
-                best_f=train_y_vesseq.max(),
-                num_paths=num_paths,
-                clamp_min=clamp_min,
-                # k=init_k / np.log(2 + bo_iter),
-                k=k_next,
-                bounds=bounds,
-                device=device,
-            )
         elif run_pes:
             gp_pes, mll_pes, train_x_pes, train_y_pes = optimize_af_and_fit_model(
                 pes_model,
