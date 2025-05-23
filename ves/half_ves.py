@@ -48,7 +48,7 @@ class HalfVES(MCAcquisitionFunction):
     def forward(
             self,
             x: torch.Tensor
-            ):
+    ):
         """
         The forward function evaluates ESLB for fixed k and beta
         Follow Eq 3.8
@@ -111,7 +111,7 @@ class HalfVESNew(MCAcquisitionFunction):
     def forward(
             self,
             x: torch.Tensor
-            ):
+    ):
         """
         The forward function evaluates ESLB for fixed k and beta
         Follow Eq 3.8
@@ -132,7 +132,7 @@ class HalfVESNew(MCAcquisitionFunction):
     def generate_max_value_term(
             self,
             x: torch.Tensor
-            ):
+    ):
         """
         This function generate values of y^* - max(y_x, y^*_t) given
         position X and paths.
@@ -153,7 +153,7 @@ class HalfVESNew(MCAcquisitionFunction):
     def find_k(
             self,
             max_value_term: torch.Tensor
-            ):
+    ):
         """
         This function evaluates the optimal values of k and beta
         Args:
@@ -172,7 +172,7 @@ class HalfVESNew(MCAcquisitionFunction):
     def root_finding(
             self,
             x: torch.Tensor
-            ):
+    ):
         """
         Root finding function to solve Eq 3.9; Non-differentiable(?)
         """

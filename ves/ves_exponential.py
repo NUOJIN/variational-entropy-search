@@ -14,15 +14,15 @@ from ves.util import optimize_posterior_samples
 class VariationalEntropySearchExponential(MCAcquisitionFunction):
 
     def __init__(
-        self,
-        model: Model,
-        best_f: Union[float, torch.Tensor],
-        paths,
-        clamp_min: float,
-        optimize_acqf_options: dict[str, Any] | None = None,
-        bounds: torch.Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
-        device: torch.device = torch.device("cpu"),
-        **kwargs: Any,
+            self,
+            model: Model,
+            best_f: Union[float, torch.Tensor],
+            paths,
+            clamp_min: float,
+            optimize_acqf_options: dict[str, Any] | None = None,
+            bounds: torch.Tensor = torch.Tensor([[torch.zeros(1), torch.ones(1)]]),
+            device: torch.device = torch.device("cpu"),
+            **kwargs: Any,
     ):
         """
         The VES(-Gamma) class should be initialized with following args
@@ -41,16 +41,16 @@ class VariationalEntropySearchExponential(MCAcquisitionFunction):
         if optimize_acqf_options is None:
             optimize_acqf_options = {
                 "num_restarts": 5,
-                "raw_samples": 1024,
-                "options": {"sample_around_best": True},
+                "raw_samples" : 1024,
+                "options"     : {"sample_around_best": True},
             }
         self.optimize_acqf_options = optimize_acqf_options
 
     def forward(
-        self,
-        x: torch.Tensor,
-        num_iter: int = 64,
-        **kwargs: Any,
+            self,
+            x: torch.Tensor,
+            num_iter: int = 64,
+            **kwargs: Any,
     ):
         """
         This VES class implements VES-Exp, a special case of VES, and expected to be

@@ -1,36 +1,36 @@
+
+
 # Variational Entropy Search
 
-This repo contains code for our paper "Variational Entropy Search for Adjusting Expected Improvement". 
+This repository contains the official implementation of our paper:
 
-## Referencing this code
+**"A Unified Framework for Entropy Search and Expected Improvement in Bayesian Optimization"** (arXiv:2501.18756, accepted at ICML 2025 as a spotlight poster)
 
-If you use this code in any of your own work, please refer our paper: 
-```
+## 📖 Citation
+
+If you use this code in your research, please cite our paper:
+
+```bibtex
 @misc{cheng2025unified,
-  title={A Unified Framework for Entropy Search and Expected Improvement in Bayesian Optimization},
-  author={Cheng, Nuojin* and Papenmeier, Leonard* and Becker, Stephen and Nardi, Luigi},
-  year={2025},
-  eprint={2501.18756},
-  archivePrefix={arXiv},
-  primaryClass={stat.ML}
+    title     = {A Unified Framework for Entropy Search and Expected Improvement in Bayesian Optimization},
+    author    = {Cheng, Nuojin* and Papenmeier, Leonard* and Becker, Stephen and Nardi, Luigi},
+    year      = {2025},
+    eprint    = {2501.18756},
+    archivePrefix = {arXiv},
+    primaryClass  = {stat.ML}
 }
 ```
 
-## Description of code
-### Demos for Test Functions
+## 🚀 Getting Started
 
-- **BO-1D.ipynb:** A 1D toy case comparing VES-Gamma with other functions;
-- **BO-2D.ipynb:** Demonstration for implementing VES-Gamma on 3 different test functions;
+Assuming you have a running [Bencher](https://github.com/LeoIV/bencher) container, you can run VES on the Mopta08 benchmark with the following command:
 
-### Demos for Real Datasets
-- **iris.ipynb:** Hyper-parameter tuning for XGBoost on the iris dataset;
-- **digits.ipynb:** Hyper-parameter tuning for XGBoost on the digits dataset;
-- **wine.ipynb:** Hyper-parameter tuning for XGBoost on the wine dataset;
-- **california_housing.ipynb:** Hyper-parameter tuning for XGBoost on the Carlifornia housing dataset;
+## Additional Information
 
-### Support
+For more details on parameters and usage, refer to the code documentation and comments.
 
-- **ves.py:** Main file containing *VariationalEntropySearch* class and functions for running 1D and 2D experiments;
+```bash
+python3 -m ves.main --benchmark mopta08 --exponential_family False \
+--num_paths 128 --lengthscale_prior vbo --num_bo_iter 200 --reg_lambda 1"
+```
 
-## Instruction for creating plots
-Follow the provided demos notebooks. The generated figures from read datasets are also provided in the repo.

@@ -80,7 +80,9 @@ AVAILABLE_BENCHMARKS = [
 ]
 
 
-def str2bool(string_value: str) -> bool:
+def str2bool(
+        string_value: str
+) -> bool:
     """
     Convert string to boolean
 
@@ -100,7 +102,9 @@ def str2bool(string_value: str) -> bool:
 
 
 @contextmanager
-def torch_random_seed(seed: int | None):
+def torch_random_seed(
+        seed: int | None
+):
     """
     Sets the random seed for torch operations within the context.
 
@@ -267,10 +271,14 @@ def find_root_log_minus_digamma(
     float or tensor: Approximate root of the function.
     """
 
-    def f(x):
+    def f(
+            x
+    ):
         return math.log(x) - scipy.special.digamma(x) - intercept
 
-    def f_least_square(x):
+    def f_least_square(
+            x
+    ):
         return (f(x) ** 2) + reg_lambda * (x - reg_target) ** 2  # we want to find the root of f(x), so we square it
 
     if intercept < 0:
@@ -539,7 +547,11 @@ def get_objective(
                         x * (schwefel_bounds[1] - schwefel_bounds[0]) + schwefel_bounds[0]
                 )
 
-                def schwefel(x: Tensor, dim: int, negate: bool) -> Tensor:
+                def schwefel(
+                        x: Tensor,
+                        dim: int,
+                        negate: bool
+                ) -> Tensor:
                     res = 418.9829 * dim - torch.sum(
                         x * torch.sin(torch.sqrt(torch.abs(x)))
                     )
@@ -610,7 +622,11 @@ def get_objective(
     return objective, benchmark_dim
 
 
-def init_samples(n_init: int, dim: int, seed: int | None) -> Tensor:
+def init_samples(
+        n_init: int,
+        dim: int,
+        seed: int | None
+) -> Tensor:
     """
     Initialize samples using Sobol sequence
 
